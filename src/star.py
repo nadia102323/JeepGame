@@ -20,6 +20,9 @@ class star:
     rotation = 0.0
     rotationSpeed = 2.0
     
+    # Add offset for positioning relative to jeep
+    offsetY = 3.0  # Height above jeep
+    
     def __init__(self, x, z):
         self.obj = ImportObject.ImportedObject("../objects/star")
         self.posX = x
@@ -48,6 +51,12 @@ class star:
         self.rotation += self.rotationSpeed * deltaTime
         if self.rotation >= 360.0:
             self.rotation -= 360.0
+    
+    def followJeep(self, jeep):
+        """Update star position to follow jeep"""
+        self.posX = jeep.posX
+        self.posY = jeep.posY + self.offsetY
+        self.posZ = jeep.posZ
 
-            
-        
+
+

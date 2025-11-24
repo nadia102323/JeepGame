@@ -221,17 +221,24 @@ class ImportedObject:
     ## Load a texture from the provided image file name
     def loadTexture(self, texFile):
         if self.verbose:
-            print("Loading " + texFile)
+            print(f"Loading texture: {texFile}")
+    
+        # Check if file exists first
+        import os
+        if not os.path.exists(texFile):
+            print(f"Warning: Texture file '{texFile}' not found. Skipping texture.")
+            return None
+    
         ## Open the image file
         texImage = imageOpen(texFile)        
         try:
-            ix, iy, image = texImage.size[0], \
-                            texImage.size[1], \
-                            texImage.tobytes("raw", "RGBA", 0, -1)
+            ix = texImage.size[0]
+            iy = texImage.size[1]
+            image = texImage.tobytes("raw", "RGBX", 0, -1)
         except SystemError:
-            ix, iy, image = texImage.size[0], \
-                            texImage.size[1], \
-                            texImage.tobytes("raw", "RGBX", 0, -1)
+            ix = texImage.size[0]
+            iy = texImage.size[1]
+            image = texImage.tobytes("raw", "RGBA", 0, -1)
         ## GL.glGenTextures() and GL.glBindTexture() name and create a texture
         ## object for a texture image
         tempID = GL.glGenTextures(1)

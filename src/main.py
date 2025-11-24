@@ -32,7 +32,13 @@ jeep3Obj = jeep.jeep('r')
 allJeeps = [jeep1Obj, jeep2Obj, jeep3Obj]
 jeepNum = 0
 jeepObj = allJeeps[jeepNum]
+starObj = star.star(0.0, 0.0)
+
 #personObj = person.person(10.0,10.0)
+
+# Object manipulation mode
+manipulationMode = False  # Toggle between camera and object manipulation
+selectedObject = None  # Will be set to starObj when in manipulation mode
 
 #concerned with camera
 eyeX = 0.0
@@ -58,7 +64,7 @@ gameEnlarge = 10
 coneAmount = 15
 starAmount = 5 #val = -10 pts
 diamondAmount = 1 #val = deducts entire by 1/2
-# diamondObj = diamond.diamond(random.randint(-land, land), random.randint(10.0, land*gameEnlarge))
+diamondObj = diamond.diamond(random.randint(-land, land), random.randint(10.0, land*gameEnlarge))
 usedDiamond = False
 
 allcones = []
@@ -222,6 +228,8 @@ def display():
     jeepObj.drawW2()
     jeepObj.drawLight()
     #personObj.draw()
+    starObj.followJeep(jeepObj)
+    starObj.draw()
     glutSwapBuffers()
 
 def idle():#--------------with more complex display items like turning wheel---
@@ -259,12 +267,44 @@ def setObjView():
 
 #-------------------------------------------user inputs------------------
 def mouseHandle(button, state, x, y):
-    global midDown
+    global midDown, radius, leftDown, rightDown, lastMouseX, lastMouseY
+    
     if (button == GLUT_MIDDLE_BUTTON and state == GLUT_DOWN):
         midDown = True
         print ('pushed')
+    
+    # Mouse wheel for zoom
+    elif button == 3:  # Scroll up
+        if manipulationMode and selectedObject:
+            # Scale up the selected object
+            selectedObject.sizeX *= 1.1
+            selectedObject.sizeY *= 1.1
+            selectedObject.sizeZ *= 1.1
+        else:
+            # Zoom in camera
+            radius = max(1.0, radius - 1.0)
+            eyeX = radius * math.sin(angle)
+            eyeZ = radius * math.cos(angle)
+            setView()
+    elif button == 4:  # Scroll down
+        if manipulationMode and selectedObject:
+            # Scale down the selected object
+            selectedObject.sizeX *= 0.9
+            selectedObject.sizeY *= 0.9
+            selectedObject.sizeZ *= 0.9
+        else:
+            # Zoom out camera
+            radius = min(50.0, radius + 1.0)
+            eyeX = radius * math.sin(angle)
+            eyeZ = radius * math.cos(angle)
+            setView()
+
     else:
-        midDown = False    
+        midDown = False 
+
+    glutPostRedisplay()  
+
+
         
 def motionHandle(x,y):
     global nowX, nowY, angle, eyeX, eyeY, eyeZ, phi
@@ -296,6 +336,31 @@ def motionHandle(x,y):
 def specialKeys(keypress, mX, mY):
     # things to do
     # this is the function to move the car
+    global canStart
+    if not canStart:
+        return
+    
+    moveSpeed = 0.5
+
+    if keypress == GLUT_KEY_UP:
+        print("Arrow Up - moving forward")
+        jeepObj.posZ += moveSpeed
+        collisionCheck()
+    elif keypress == GLUT_KEY_DOWN:
+        print("Arrow Down - moving backward")
+        jeepObj.posZ -= moveSpeed
+        collisionCheck()
+    elif keypress == GLUT_KEY_LEFT:
+        print("Arrow Left - moving left")
+        jeepObj.posX -= moveSpeed
+        collisionCheck()
+    elif keypress == GLUT_KEY_RIGHT:
+        print("Arrow Right - moving right")
+        jeepObj.posX += moveSpeed
+        collisionCheck()
+    
+    glutPostRedisplay()
+
     pass
 
 def myKeyboard(key, mX, mY):
@@ -320,6 +385,38 @@ def myKeyboard(key, mX, mY):
             glutMainLoop()
     # things can do
     # this is the part to set special functions, such as help window.
+    elif key == b'w':
+        print("w pushed")
+        if canStart:
+            jeepObj.posZ += 0.5
+            collisionCheck()
+            glutPostRedisplay()
+    elif key == b's':
+        print("s pushed")
+        if canStart:
+            jeepObj.posZ -= 0.5
+            collisionCheck()
+            glutPostRedisplay()
+    elif key == b'a':
+        print("a pushed")
+        if canStart:
+            jeepObj.posX -= 0.5
+            collisionCheck()
+            glutPostRedisplay()
+    elif key == b'd':
+        print("d pushed")
+        if canStart:
+            jeepObj.posX += 0.5
+            collisionCheck()
+            glutPostRedisplay()
+    elif key == b't':
+        topView = not topView
+        setView()
+    elif key == b'b':
+        behindView = not behindView
+        setView()
+
+        
 
 #-------------------------------------------------tools----------------------       
 def drawTextBitmap(string, x, y): #for writing text to display
@@ -659,6 +756,7 @@ def main():
     jeep2Obj.makeDisplayLists()
     jeep3Obj.makeDisplayLists()
     #personObj.makeDisplayLists()
+    starObj.makeDisplayLists() # Add this line to create display lists for stars
 
     # things to do
     # add a automatic object
