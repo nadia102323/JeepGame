@@ -1,7 +1,7 @@
 from OpenGL.GL import *
 from OpenGL.GLUT import *
 from OpenGL.GLU import *
-import math, time
+import math, time, random
 import ImportObject
 
 
@@ -23,6 +23,44 @@ class cone:
         self.obj = ImportObject.ImportedObject("../objects/cone")
         self.posX = x
         self.posZ = z
+
+        # Add movement properties
+        self.moveSpeed = 0.1
+        self.direction = random.choice([-1, 1])  # Random initial direction
+        self.moveRange = 5.0  # How far it can move from start
+        self.originalX = x
+        self.isAutomatic = False  # Flag to identify automatic cones
+        
+    def update(self, land, jeepObj, allCones):
+        """Update automatic cone movement and reactions"""
+        if not self.isAutomatic:
+            return
+            
+        # Move the cone
+        self.posX += self.direction * self.moveSpeed
+        
+        # Boundary checking - reverse direction if hitting boundaries
+        if self.posX >= land or self.posX <= -land:
+            self.direction *= -1
+            
+        # Stay within movement range of original position
+        if abs(self.posX - self.originalX) > self.moveRange:
+            self.direction *= -1
+            
+        # React to jeep proximity - speed up when jeep is near
+        distanceToJeep = math.sqrt((self.posX - jeepObj.posX)**2 + (self.posZ - jeepObj.posZ)**2)
+        if distanceToJeep < 15.0:
+            self.moveSpeed = 0.2  # Speed up
+        else:
+            self.moveSpeed = 0.1  # Normal speed
+            
+        # Avoid collision with other cones
+        for otherCone in allCones:
+            if otherCone != self:
+                distance = math.sqrt((self.posX - otherCone.posX)**2 + (self.posZ - otherCone.posZ)**2)
+                if distance < 3.0:  # Too close to another cone
+                    self.direction *= -1
+                    break
         
     def makeDisplayLists(self):
         self.obj.loadOBJ()

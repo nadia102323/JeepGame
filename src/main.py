@@ -32,9 +32,19 @@ jeep3Obj = jeep.jeep('r')
 allJeeps = [jeep1Obj, jeep2Obj, jeep3Obj]
 jeepNum = 0
 jeepObj = allJeeps[jeepNum]
-starObj = star.star(0.0, 0.0)
 
 #personObj = person.person(10.0,10.0)
+
+ribbonAmount = 3  # Number of acceleration ribbons on the track
+allribbons = []
+ribbonCoord = []
+accelerationBoost = 2.0  # Speed multiplier when accelerated
+accelerationDuration = 3000  # Duration in milliseconds
+jeepAccelerated = False
+accelerationEndTime = 0
+normalMoveSpeed = 0.5
+acceleratedMoveSpeed = normalMoveSpeed * accelerationBoost
+
 
 # Object manipulation mode
 manipulationMode = False  # Toggle between camera and object manipulation
@@ -47,6 +57,9 @@ eyeZ = 10.0
 midDown = False
 topView = False
 behindView = False
+frontView = False
+zoomLevel = 1.0  # Add zoom level variable
+
 
 #concerned with panning
 nowX = 0.0
@@ -148,7 +161,9 @@ def staticObjects():
 
 
 def display():
-    global jeepObj, canStart, score, beginTime, countTime
+    global jeepObj, canStart, score, beginTime, countTime, jeepAccelerated
+    if not topView and not frontView and not behindView:
+        setObjView()
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
 
     # Apply lighting based on menu selection
@@ -186,7 +201,7 @@ def display():
     glDisable(GL_LIGHTING)  # Temporarily disable for text rendering
     glColor3f(1.0, 1.0, 1.0)
     text3d(f"Lighting: {currentLightType.title()}", -18, 8, 0)
-    
+
     # Re-enable lighting if it should be active
     if applyLighting == True and currentLightType != "none":
         glEnable(GL_LIGHTING)
@@ -219,9 +234,13 @@ def display():
         obj.draw()
     for cone in allcones:
         cone.draw()
+    for starObj in allstars:
+        starObj.draw()
+    for ribbonObj in allribbons:
+        ribbonObj.draw()
 
-    # if (usedDiamond == False):
-    #     diamondObj.draw()
+    if (usedDiamond == False):
+        diamondObj.draw()
     
     jeepObj.draw()
     jeepObj.drawW1()
@@ -233,12 +252,21 @@ def display():
     glutSwapBuffers()
 
 def idle():#--------------with more complex display items like turning wheel---
-    global tickTime, prevTime, score
+    global tickTime, prevTime, score, jeepAccelerated, accelerationEndTime
     jeepObj.rotateWheel(-0.1 * tickTime)    
+    
+    # Check if acceleration has expired
+    curTime = glutGet(GLUT_ELAPSED_TIME)
+    if jeepAccelerated and curTime > accelerationEndTime:
+        jeepAccelerated = False
+        print("Acceleration ended")
+    
+    # Update automatic objects
+    updateAutomaticObjects()
+    
     glutPostRedisplay()
     
-    curTime = glutGet(GLUT_ELAPSED_TIME)
-    tickTime =  curTime - prevTime
+    tickTime = curTime - prevTime
     prevTime = curTime
     score = curTime/1000
     
@@ -250,62 +278,66 @@ def setView():
     glLoadIdentity()
     gluPerspective(90, 1, 0.1, 100)
     if (topView == True):
-        gluLookAt(0, 10, land*gameEnlarge/2, 0, jeepObj.posY, land*gameEnlarge/2, 0, 1, 0)
-    elif (behindView ==True):
-        gluLookAt(jeepObj.posX, jeepObj.posY + 1.0, jeepObj.posZ - 2.0, jeepObj.posX, jeepObj.posY, jeepObj.posZ, 0, 1, 0) 
-    else:
+        cameraHeight = 30.0  # Much higher than before
+        gluLookAt(jeepObj.posX, cameraHeight, jeepObj.posZ,  # Camera position above jeep
+                  jeepObj.posX, jeepObj.posY, jeepObj.posZ,  # Look at jeep
+                  0, 0, 1)         
+        print("top view")
+    elif (frontView ==True):
         gluLookAt(eyeX, eyeY, eyeZ, 0, 0, 0, 0, 1, 0)
+        print("front view")
+    else:
+        #gluLookAt(jeepObj.posX, jeepObj.posY + 10.0, jeepObj.posZ - 20.0, jeepObj.posX, jeepObj.posY, jeepObj.posZ, 0, 1, 0) 
+        #print("default view")
+        setObjView()
+        return
     glMatrixMode(GL_MODELVIEW)
+    glutPostRedisplay() 
+
     
-    glutPostRedisplay()    
 
 def setObjView():
     # things to do
     # realize a view following the jeep
     # refer to setview
-    pass
+    global eyeX, eyeY, eyeZ
+    glMatrixMode(GL_PROJECTION)
+    glLoadIdentity()
+    
+    # Apply zoom by adjusting field of view
+    baseFov = 90.0
+    currentFov = baseFov / zoomLevel
+    currentFov = max(10, min(150, currentFov))
+    
+    gluPerspective(currentFov, 1, 0.1, 100)
+    
+    # Camera follows the jeep from behind and slightly above
+    cameraDistance = 20.0
+    cameraHeight = 10.0
+    
+    # Position camera behind the jeep
+    cameraX = jeepObj.posX
+    cameraY = jeepObj.posY + cameraHeight
+    cameraZ = jeepObj.posZ - cameraDistance
+    
+    # Look at the jeep
+    gluLookAt(cameraX, cameraY, cameraZ,  # Camera position
+              jeepObj.posX, jeepObj.posY, jeepObj.posZ,  # Look at jeep
+              0, 1, 0)  # Up vector
+    
+    glMatrixMode(GL_MODELVIEW)
+    #glutPostRedisplay()
 
 #-------------------------------------------user inputs------------------
 def mouseHandle(button, state, x, y):
-    global midDown, radius, leftDown, rightDown, lastMouseX, lastMouseY
-    
+    global midDown
     if (button == GLUT_MIDDLE_BUTTON and state == GLUT_DOWN):
         midDown = True
         print ('pushed')
-    
-    # Mouse wheel for zoom
-    elif button == 3:  # Scroll up
-        if manipulationMode and selectedObject:
-            # Scale up the selected object
-            selectedObject.sizeX *= 1.1
-            selectedObject.sizeY *= 1.1
-            selectedObject.sizeZ *= 1.1
-        else:
-            # Zoom in camera
-            radius = max(1.0, radius - 1.0)
-            eyeX = radius * math.sin(angle)
-            eyeZ = radius * math.cos(angle)
-            setView()
-    elif button == 4:  # Scroll down
-        if manipulationMode and selectedObject:
-            # Scale down the selected object
-            selectedObject.sizeX *= 0.9
-            selectedObject.sizeY *= 0.9
-            selectedObject.sizeZ *= 0.9
-        else:
-            # Zoom out camera
-            radius = min(50.0, radius + 1.0)
-            eyeX = radius * math.sin(angle)
-            eyeZ = radius * math.cos(angle)
-            setView()
-
     else:
-        midDown = False 
-
-    glutPostRedisplay()  
+        midDown = False    
 
 
-        
 def motionHandle(x,y):
     global nowX, nowY, angle, eyeX, eyeY, eyeZ, phi
     if (midDown == True):
@@ -331,32 +363,49 @@ def motionHandle(x,y):
     #print eyeX, eyeY, eyeZ, nowX, nowY, radius, angle
     #print "getting handled"
 
+def mouseWheelHandle(wheel, direction, x, y):
+    global zoomLevel
+    zoomFactor = 1.1
+    
+    if direction > 0:  # Scroll up - zoom in
+        zoomLevel /= zoomFactor
+        print(f"Zooming in - zoom level: {zoomLevel:.2f}")
+    else:  # Scroll down - zoom out
+        zoomLevel *= zoomFactor
+        print(f"Zooming out - zoom level: {zoomLevel:.2f}")
+    
+    # Clamp zoom level to reasonable bounds
+    zoomLevel = max(0.1, min(5.0, zoomLevel))
+    
+    setView()
 
-
+    
 def specialKeys(keypress, mX, mY):
     # things to do
     # this is the function to move the car
-    global canStart
+    global canStart, jeepAccelerated
     if not canStart:
         return
     
-    moveSpeed = 0.5
+    # Use different move speeds based on acceleration status
+    moveSpeed = acceleratedMoveSpeed if jeepAccelerated else normalMoveSpeed
 
     if keypress == GLUT_KEY_UP:
         print("Arrow Up - moving forward")
         jeepObj.posZ += moveSpeed
         collisionCheck()
+        glutPostRedisplay()
     elif keypress == GLUT_KEY_DOWN:
         print("Arrow Down - moving backward")
         jeepObj.posZ -= moveSpeed
         collisionCheck()
     elif keypress == GLUT_KEY_LEFT:
         print("Arrow Left - moving left")
-        jeepObj.posX -= moveSpeed
+        jeepObj.posX += moveSpeed
         collisionCheck()
     elif keypress == GLUT_KEY_RIGHT:
         print("Arrow Right - moving right")
-        jeepObj.posX += moveSpeed
+        jeepObj.posX -= moveSpeed
         collisionCheck()
     
     glutPostRedisplay()
@@ -364,7 +413,7 @@ def specialKeys(keypress, mX, mY):
     pass
 
 def myKeyboard(key, mX, mY):
-    global eyeX, eyeY, eyeZ, angle, radius, helpWindow, centered, helpWin, overReason, topView, behindView
+    global eyeX, eyeY, eyeZ, angle, radius, helpWindow, centered, helpWin, overReason, topView, behindView, frontView, isFullscreen, jeepAccelerated
     if key == b"h":
         print ("h pushed"+ str(helpWindow))
         winNum = glutGetWindow()
@@ -383,40 +432,54 @@ def myKeyboard(key, mX, mY):
             glutHideWindow()
             #glutDestroyWindow(helpWin)
             glutMainLoop()
+
     # things can do
     # this is the part to set special functions, such as help window.
+
+    elif key == b't':
+        print("t pushed")
+        topView = not topView
+        behindView, frontView = False, False
+        setView()
+    elif key == b'b':
+        print("b pushed")
+        behindView = not behindView
+        topView, frontView = False, False
+        setView()
+    elif key == b'f':
+        print("f pushed")
+        frontView = not frontView
+        behindView, topView = False, False
+        setView()
+   
     elif key == b'w':
         print("w pushed")
         if canStart:
-            jeepObj.posZ += 0.5
+            moveSpeed = acceleratedMoveSpeed if jeepAccelerated else normalMoveSpeed
+            jeepObj.posZ += moveSpeed
             collisionCheck()
             glutPostRedisplay()
     elif key == b's':
         print("s pushed")
         if canStart:
-            jeepObj.posZ -= 0.5
+            moveSpeed = acceleratedMoveSpeed if jeepAccelerated else normalMoveSpeed
+            jeepObj.posZ -= moveSpeed
             collisionCheck()
             glutPostRedisplay()
     elif key == b'a':
         print("a pushed")
         if canStart:
-            jeepObj.posX -= 0.5
+            moveSpeed = acceleratedMoveSpeed if jeepAccelerated else normalMoveSpeed
+            jeepObj.posX += moveSpeed
             collisionCheck()
             glutPostRedisplay()
     elif key == b'd':
         print("d pushed")
         if canStart:
-            jeepObj.posX += 0.5
+            moveSpeed = acceleratedMoveSpeed if jeepAccelerated else normalMoveSpeed
+            jeepObj.posX -= moveSpeed
             collisionCheck()
             glutPostRedisplay()
-    elif key == b't':
-        topView = not topView
-        setView()
-    elif key == b'b':
-        behindView = not behindView
-        setView()
-
-        
 
 #-------------------------------------------------tools----------------------       
 def drawTextBitmap(string, x, y): #for writing text to display
@@ -440,12 +503,43 @@ def noReshape(newX, newY): #used to ensure program works correctly when resized
     glutReshapeWindow(windowSize,windowSize)
 
 #--------------------------------------------making game more complex--------
-def addCone(x,z):
-    allcones.append(cone.cone(x,z))
-    obstacleCoord.append((x,z))
+def addCone(x,z, automatic=False):
+    #allcones.append(cone.cone(x,z))
+    #obstacleCoord.append((x,z))
+    newCone = cone.cone(x, z)
+    newCone.isAutomatic = automatic
+    allcones.append(newCone)
+    obstacleCoord.append((x, z))
+
+def updateAutomaticObjects():
+    """Update all automatic objects"""
+    global obstacleCoord
+    
+    for i, coneObj in enumerate(allcones):
+        if hasattr(coneObj, 'isAutomatic') and coneObj.isAutomatic:
+            oldX = coneObj.posX
+            coneObj.update(land, jeepObj, allcones)
+            
+            # Update obstacle coordinates for collision detection
+            if i < len(obstacleCoord):
+                obstacleCoord[i] = (coneObj.posX, coneObj.posZ)
+
+def idle():
+    global tickTime, prevTime, score
+    jeepObj.rotateWheel(-0.1 * tickTime)    
+    
+    # Update automatic objects
+    updateAutomaticObjects()
+    
+    glutPostRedisplay()
+    
+    curTime = glutGet(GLUT_ELAPSED_TIME)
+    tickTime = curTime - prevTime
+    prevTime = curTime
+    score = curTime/1000
 
 def collisionCheck():
-    global overReason, score, usedDiamond, countTime
+    global overReason, score, usedDiamond, countTime, jeepAccelerated, accelerationEndTime
     for obstacle in obstacleCoord:
         if dist((jeepObj.posX, jeepObj.posZ), obstacle) <= ckSense:
             overReason = "You hit an obstacle!"
@@ -454,13 +548,26 @@ def collisionCheck():
         overReason = "You ran off the road!"
         gameOver()
 
+    # Check for ribbon collision (acceleration boost)
+    for i, ribbon in enumerate(ribbonCoord):
+        if dist((jeepObj.posX, jeepObj.posZ), ribbon) <= ckSense:
+            if not jeepAccelerated:  # Only activate if not already accelerated
+                print("Acceleration ribbon activated!")
+                jeepAccelerated = True
+                curTime = glutGet(GLUT_ELAPSED_TIME)
+                accelerationEndTime = curTime + accelerationDuration
+                # Remove the ribbon after use (optional)
+                ribbonCoord.pop(i)
+                allribbons.pop(i)
+                break
+
     if (dist((jeepObj.posX, jeepObj.posZ), (diamondObj.posX, diamondObj.posZ)) <= ckSense and usedDiamond ==False):
         print ("Diamond bonus!")
         countTime /= 2
         usedDiamond = True
     if (jeepObj.posZ >= land*gameEnlarge):
         gameSuccess()
-        
+
 #----------------------------------multiplayer dev (using tracker)-----------
 def recordGame():
     with open('results.csv', 'wt') as csvfile:
@@ -527,8 +634,15 @@ def showHelp():
     glColor3f(1.0,0.0,0.0)
     drawTextBitmap("Help Guide" , -0.2, 0.85)
     glColor3f(0.0,0.0,1.0)
-    drawTextBitmap("describe your control strategy." , -1.0, 0.7)
+    drawTextBitmap("1. Move the jeep using arrow keys / WASD keys" , -1.0, 0.7)
+    drawTextBitmap("2. Zoom in and out by mouse scroll wheel" , -1.0, 0.55)
+    drawTextBitmap("3. Toggle views using keys: T (top), B (behind), F (front)" , -1.0, 0.4)
+    drawTextBitmap("4. Press H to show/hide this help window" , -1.0, 0.25)
+    drawTextBitmap("5. Press R to cycle resolution" , -1.0, 0.1)
+    #drawTextBitmap("6. Press F to toggle fullscreen" , -1.0, -0.05)
+    drawTextBitmap("7. Right-click to change lighting options" , -1.0, -0.2)
     glutSwapBuffers()
+
 
 #----------------------------------------------texture development-----------
 def loadTexture(imageName):
@@ -710,7 +824,7 @@ def myMenu(option):
         # Reset to original clear color
         resetLightingState()
         print("Reset")
-    
+
     print("Current Light Type: " + currentLightType)
     glutPostRedisplay()
 
@@ -737,6 +851,7 @@ def main():
 
     glutMouseFunc(mouseHandle)
     glutMotionFunc(motionHandle)
+    glutMouseWheelFunc(mouseWheelHandle)  # Register mouse wheel callback
     glutSpecialFunc(specialKeys)
     glutKeyboardFunc(myKeyboard)
     glutReshapeFunc(noReshape)
@@ -756,22 +871,50 @@ def main():
     jeep2Obj.makeDisplayLists()
     jeep3Obj.makeDisplayLists()
     #personObj.makeDisplayLists()
-    starObj.makeDisplayLists() # Add this line to create display lists for stars
+    #starObj.makeDisplayLists() # Add this line to create display lists for stars
 
     # things to do
     # add a automatic object
-    for i in range(coneAmount):#create cones randomly for obstacles, making sure to give a little lag time in beginning by adding 10.0 buffer
+    """for i in range(coneAmount):#create cones randomly for obstacles, making sure to give a little lag time in beginning by adding 10.0 buffer
         addCone(random.randint(-land, land), random.randint(10.0, land*gameEnlarge))
+    """
 
-    # things to do
-    # add stars
+    for i in range(coneAmount - 2):  # Reduce by 2 to make room for automatic ones
+        addCone(random.randint(-land, land), random.randint(10.0, land*gameEnlarge))
+        
+    # Add 2 automatic cones that move around
+    addCone(random.randint(-land//2, land//2), random.randint(20.0, 40.0), automatic=True)
+    addCone(random.randint(-land//2, land//2), random.randint(60.0, 80.0), automatic=True)
+
 
     for cone in allcones:
         cone.makeDisplayLists()
 
+    # things to do
+    # add stars
+    for i in range(starAmount):#create stars randomly for rewards, making sure to give a little lag time in beginning by adding 10.0 buffer
+        newStarX = random.randint(-land, land)
+        newStarZ = random.randint(10.0, land*gameEnlarge)
+        allstars.append(star.star(newStarX, newStarZ))
+        rewardCoord.append((newStarX, newStarZ))
+
+    for starObj in allstars:
+        starObj.makeDisplayLists()
 
     
-    # diamondObj.makeDisplayLists()
+    diamondObj.makeDisplayLists()
+
+    for i in range(ribbonAmount):
+        newRibbonX = random.randint(-land//2, land//2)  # Keep ribbons more centered
+        newRibbonZ = random.randint(30.0, land*gameEnlarge - 30.0)  # Spread throughout track
+        ribbonStar = star.star(newRibbonX, newRibbonZ)
+        # Make ribbon stars visually distinct (you can modify star.py to add a ribbon mode)
+        allribbons.append(ribbonStar)
+        ribbonCoord.append((newRibbonX, newRibbonZ))
+
+    for ribbonObj in allribbons:
+        ribbonObj.makeDisplayLists()
+   
     
     staticObjects()
     if (applyLighting == True):
