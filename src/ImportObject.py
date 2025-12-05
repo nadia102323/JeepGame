@@ -1,6 +1,7 @@
 import OpenGL.GL as GL
 import OpenGL.GLUT as GLUT
 import OpenGL.GLU as GLU
+import os
 ## Avoid conflict with Python open
 from PIL.Image import open as imageOpen
 
@@ -22,7 +23,11 @@ class ImportedObject:
         ## Set this value to False before loading if the model is flat
         self.isSmooth = True
         self.verbose = verbose
+        ## Store the base directory for searching textures
+        self.baseDir = os.path.dirname(fileName)
 
+
+    ## Load the material properties from the file
     ## Load the material properties from the file
     def loadMat(self):
         ## Open the material file
@@ -42,6 +47,10 @@ class ImportedObject:
                     elif vals[0] == "Ns":                        
                         n = vals[1]  
                         tempMat.append(float(n))
+                    ## Load the ambient values (if not overridden)
+                    elif vals[0] == "Ka" and not self.setAmbient:  
+                        n = list(map(float, vals[1:4]))  
+                        tempMat.append(n)
                     ## Load the diffuse values
                     elif vals[0] == "Kd":  
                         n = list(map(float, vals[1:4]))  
@@ -51,28 +60,36 @@ class ImportedObject:
                         ## equal to diffuse
                         if self.setAmbient:
                             tempMat.append(n)
-                    ## load the ambient values (if not overridden)
-                    elif vals[0] == "Ka" and not self.setAmbient:  
-                        n = list(map(float, vals[1:4]))  
-                        tempMat.append(n)
                     ## load the specular values
                     elif vals[0] == "Ks":  
                         n = list(map(float, vals[1:4]))  
                         tempMat.append(n)
-                        tempMat.append(None)
+                        tempMat.append(None)  # Placeholder for texture
                         ## specular is the last line loaded for the material
                         self.materials.append(tempMat)
                         tempMat = []
                     ## load texture file info
                     elif vals[0] == "map_Kd":
                         ## record the texture file name
-                        fileName = vals[1]                        
-                        self.materials[-1][5]=(self.loadTexture(fileName))                        
-                        self.hasTex = True
+                        fileName = vals[1]
+                        ## If material hasn't been added yet, ensure it has enough elements
+                        if len(tempMat) > 0 and len(tempMat) < 6:
+                            # Pad the material with None values if needed
+                            while len(tempMat) < 6:
+                                tempMat.append(None)
+                            # Add to materials list if not already there
+                            if tempMat not in self.materials:
+                                self.materials.append(tempMat)
+                        
+                        # Now set the texture
+                        if len(self.materials) > 0:
+                            self.materials[-1][5] = self.loadTexture(fileName)
+                            self.hasTex = True
                         
         if self.verbose:             
             print("Loaded " + self.fileName + \
                   ".mtl with " + str(len(self.materials)) + " materials")
+
 
     ## Load the object geometry.
     def loadOBJ(self):
@@ -221,24 +238,50 @@ class ImportedObject:
     ## Load a texture from the provided image file name
     def loadTexture(self, texFile):
         if self.verbose:
-            print(f"Loading texture: {texFile}")
-    
-        # Check if file exists first
-        import os
-        if not os.path.exists(texFile):
-            print(f"Warning: Texture file '{texFile}' not found. Skipping texture.")
+            print("Loading " + texFile)
+
+        ## Search for texture in multiple possible locations
+        searchPaths = [
+            texFile,  ## Original path from .mtl file
+            os.path.join(self.baseDir, texFile),  ## Same dir as model
+            os.path.join(self.baseDir, "..", "img", texFile),  ## img folder
+            os.path.join(self.baseDir, "..", "textures", texFile),  ## textures folder
+            os.path.join(self.baseDir, "..", "textures", "lamp", texFile),  ## lamp textures folder
+            os.path.join("img", texFile),  ## Relative img
+            os.path.join("textures", texFile),  ## Relative textures
+            os.path.join("textures", "lamp", texFile),  ## Relative lamp textures
+        ]
+        
+        texImage = None
+        foundPath = None
+        for path in searchPaths:
+            if os.path.exists(path):
+                foundPath = path
+                if self.verbose:
+                    print("Found texture at: " + foundPath)
+                texImage = imageOpen(foundPath)
+                break
+        
+        if texImage is None:
+            print(f"ERROR: Could not find texture file: {texFile}")
+            print(f"Searched in: {searchPaths}")
             return None
-    
-        ## Open the image file
-        texImage = imageOpen(texFile)        
+
+        ## Convert image to RGBA if it's not already
+        if texImage.mode != 'RGBA':
+            if self.verbose:
+                print(f"Converting texture from {texImage.mode} to RGBA")
+            texImage = texImage.convert('RGBA')
+
+        ## Process the loaded image
         try:
-            ix = texImage.size[0]
-            iy = texImage.size[1]
-            image = texImage.tobytes("raw", "RGBX", 0, -1)
+            ix, iy, image = texImage.size[0], \
+                            texImage.size[1], \
+                            texImage.tobytes("raw", "RGBA", 0, -1)
         except SystemError:
-            ix = texImage.size[0]
-            iy = texImage.size[1]
-            image = texImage.tobytes("raw", "RGBA", 0, -1)
+            ix, iy, image = texImage.size[0], \
+                            texImage.size[1], \
+                            texImage.tobytes("raw", "RGBX", 0, -1)
         ## GL.glGenTextures() and GL.glBindTexture() name and create a texture
         ## object for a texture image
         tempID = GL.glGenTextures(1)
@@ -268,4 +311,3 @@ class ImportedObject:
         GL.glTexImage2D(GL.GL_TEXTURE_2D, 0, 3, ix, iy, 0,
                         GL.GL_RGBA, GL.GL_UNSIGNED_BYTE, image)
         return tempID
-

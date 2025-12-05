@@ -5,13 +5,18 @@ from OpenGL.GLU import *
 import math, time, random, csv, datetime
 import ImportObject
 import PIL.Image as Image
-import jeep, cone, star, diamond
+import jeep, cone, star, diamond, ribbon, streetlamp
 
 windowSize = 600
 helpWindow = False
 helpWin = 0
 mainWin = 0
 centered = False
+
+isFullscreen = False
+windowResolutions = [(600, 600), (800, 600), (1024, 768), (1280, 720), (1920, 1080)]
+currentResolutionIndex = 0
+normalWindowSize = windowResolutions[currentResolutionIndex]
 
 beginTime = 0
 countTime = 0
@@ -39,7 +44,7 @@ ribbonAmount = 3  # Number of acceleration ribbons on the track
 allribbons = []
 ribbonCoord = []
 accelerationBoost = 2.0  # Speed multiplier when accelerated
-accelerationDuration = 3000  # Duration in milliseconds
+accelerationDuration = 1000  # Duration in milliseconds
 jeepAccelerated = False
 accelerationEndTime = 0
 normalMoveSpeed = 0.5
@@ -104,6 +109,9 @@ matDiffuse = [0.5, 0.5, 0.5, 1.0]
 matSpecular = [0.5, 0.5, 0.5, 1.0]
 matShininess  = 100.0
 
+lampAmount = 8  # Number of street lamps
+alllamps = []
+lampSpacing = (land * gameEnlarge) / lampAmount  # Even spacing along the road
 
 
 #--------------------------------------developing scene---------------
@@ -115,9 +123,11 @@ class Scene:
     landW = 1.0
     landH = 0.0
     cont = gameEnlarge
+    grassExtend = 30
     
     def draw(self):
         self.drawAxis()
+        self.drawGrass()
         self.drawLand()
 
     def drawAxis(self):
@@ -130,6 +140,63 @@ class Scene:
         glVertex(0, 0, -self.axisLength)
         glVertex(0, 0, self.axisLength)
         glEnd()
+
+    def drawGrass(self):
+        """Draw grass texture on both sides of the road"""
+        glEnable(GL_TEXTURE_2D)
+        glTexEnvf(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_DECAL)
+        glBindTexture(GL_TEXTURE_2D, grassTextureID)
+
+        # Left grass area
+        glBegin(GL_POLYGON)
+        glTexCoord2f(0.0, 0.0)
+        glVertex3f(-self.landLength - self.grassExtend, -0.1, self.cont * self.landLength)
+        glTexCoord2f(0.0, 5.0)
+        glVertex3f(-self.landLength - self.grassExtend, -0.1, -self.landLength)
+        glTexCoord2f(2.0, 5.0)
+        glVertex3f(-self.landLength, -0.1, -self.landLength)
+        glTexCoord2f(2.0, 0.0)
+        glVertex3f(-self.landLength, -0.1, self.cont * self.landLength)
+        glEnd()
+
+        # Right grass area
+        glBegin(GL_POLYGON)
+        glTexCoord2f(0.0, 0.0)
+        glVertex3f(self.landLength, -0.1, self.cont * self.landLength)
+        glTexCoord2f(0.0, 5.0)
+        glVertex3f(self.landLength, -0.1, -self.landLength)
+        glTexCoord2f(2.0, 5.0)
+        glVertex3f(self.landLength + self.grassExtend, -0.1, -self.landLength)
+        glTexCoord2f(2.0, 0.0)
+        glVertex3f(self.landLength + self.grassExtend, -0.1, self.cont * self.landLength)
+        glEnd()
+
+        # Front grass area (before starting line)
+        glBegin(GL_POLYGON)
+        glTexCoord2f(0.0, 0.0)
+        glVertex3f(-self.landLength - self.grassExtend, -0.1, -self.landLength)
+        glTexCoord2f(0.0, 2.0)
+        glVertex3f(-self.landLength - self.grassExtend, -0.1, -self.landLength - self.grassExtend)
+        glTexCoord2f(5.0, 2.0)
+        glVertex3f(self.landLength + self.grassExtend, -0.1, -self.landLength - self.grassExtend)
+        glTexCoord2f(5.0, 0.0)
+        glVertex3f(self.landLength + self.grassExtend, -0.1, -self.landLength)
+        glEnd()
+
+        # Back grass area (after finish line)
+        glBegin(GL_POLYGON)
+        glTexCoord2f(0.0, 0.0)
+        glVertex3f(-self.landLength - self.grassExtend, -0.1, self.cont * self.landLength)
+        glTexCoord2f(0.0, 2.0)
+        glVertex3f(-self.landLength - self.grassExtend, -0.1, self.cont * self.landLength + self.grassExtend)
+        glTexCoord2f(5.0, 2.0)
+        glVertex3f(self.landLength + self.grassExtend, -0.1, self.cont * self.landLength + self.grassExtend)
+        glTexCoord2f(5.0, 0.0)
+        glVertex3f(self.landLength + self.grassExtend, -0.1, self.cont * self.landLength)
+        glEnd()
+
+        glDisable(GL_TEXTURE_2D)
+
 
     def drawLand(self):
         glEnable(GL_TEXTURE_2D)
@@ -238,6 +305,8 @@ def display():
         starObj.draw()
     for ribbonObj in allribbons:
         ribbonObj.draw()
+    for lampObj in alllamps:
+        lampObj.draw()
 
     if (usedDiamond == False):
         diamondObj.draw()
@@ -247,7 +316,7 @@ def display():
     jeepObj.drawW2()
     jeepObj.drawLight()
     #personObj.draw()
-    starObj.followJeep(jeepObj)
+    #starObj.followJeep(jeepObj)
     starObj.draw()
     glutSwapBuffers()
 
@@ -259,7 +328,7 @@ def idle():#--------------with more complex display items like turning wheel---
     curTime = glutGet(GLUT_ELAPSED_TIME)
     if jeepAccelerated and curTime > accelerationEndTime:
         jeepAccelerated = False
-        print("Acceleration ended")
+        print("Acceleration ended - returning to normal speed")
     
     # Update automatic objects
     updateAutomaticObjects()
@@ -276,7 +345,19 @@ def setView():
     global eyeX, eyeY, eyeZ
     glMatrixMode(GL_PROJECTION)
     glLoadIdentity()
-    gluPerspective(90, 1, 0.1, 100)
+    
+    # Calculate aspect ratio from current window size
+    width = glutGet(GLUT_WINDOW_WIDTH)
+    height = glutGet(GLUT_WINDOW_HEIGHT)
+    aspectRatio = width / height if height != 0 else 1.0
+    
+    # Apply zoom
+    baseFov = 90.0
+    currentFov = baseFov / zoomLevel
+    currentFov = max(10, min(150, currentFov))
+    
+    gluPerspective(currentFov, aspectRatio, 0.1, 100)
+    
     if (topView == True):
         cameraHeight = 30.0  # Much higher than before
         gluLookAt(jeepObj.posX, cameraHeight, jeepObj.posZ,  # Camera position above jeep
@@ -292,8 +373,7 @@ def setView():
         setObjView()
         return
     glMatrixMode(GL_MODELVIEW)
-    glutPostRedisplay() 
-
+    glutPostRedisplay()
     
 
 def setObjView():
@@ -309,7 +389,12 @@ def setObjView():
     currentFov = baseFov / zoomLevel
     currentFov = max(10, min(150, currentFov))
     
-    gluPerspective(currentFov, 1, 0.1, 100)
+    # Calculate aspect ratio from current window size
+    width = glutGet(GLUT_WINDOW_WIDTH)
+    height = glutGet(GLUT_WINDOW_HEIGHT)
+    aspectRatio = width / height if height != 0 else 1.0
+    
+    gluPerspective(currentFov, aspectRatio, 0.1, 100)
     
     # Camera follows the jeep from behind and slightly above
     cameraDistance = 20.0
@@ -367,7 +452,7 @@ def mouseWheelHandle(wheel, direction, x, y):
     global zoomLevel
     zoomFactor = 1.1
     
-    if direction > 0:  # Scroll up - zoom in
+    if direction < 0:  # Scroll up - zoom in
         zoomLevel /= zoomFactor
         print(f"Zooming in - zoom level: {zoomLevel:.2f}")
     else:  # Scroll down - zoom out
@@ -436,18 +521,18 @@ def myKeyboard(key, mX, mY):
     # things can do
     # this is the part to set special functions, such as help window.
 
-    elif key == b't':
-        print("t pushed")
+    elif key == b'5':
+        print("5 pushed")
         topView = not topView
         behindView, frontView = False, False
         setView()
-    elif key == b'b':
-        print("b pushed")
+    elif key == b'2':
+        print("2 pushed")
         behindView = not behindView
         topView, frontView = False, False
         setView()
-    elif key == b'f':
-        print("f pushed")
+    elif key == b'8':
+        print("8 pushed")
         frontView = not frontView
         behindView, topView = False, False
         setView()
@@ -481,6 +566,11 @@ def myKeyboard(key, mX, mY):
             collisionCheck()
             glutPostRedisplay()
 
+    elif key == b'f' or key == b'F':
+        print("f pushed - toggling fullscreen")
+        toggleFullscreen()
+
+
 #-------------------------------------------------tools----------------------       
 def drawTextBitmap(string, x, y): #for writing text to display
     glRasterPos2f(x, y)
@@ -500,7 +590,78 @@ def dist(pt1, pt2):
     return math.sqrt((a-x)**2 + (b-y)**2)
 
 def noReshape(newX, newY): #used to ensure program works correctly when resized
-    glutReshapeWindow(windowSize,windowSize)
+    global windowSize, normalWindowSize, isFullscreen
+    
+    # Get screen dimensions
+    screenWidth = glutGet(GLUT_SCREEN_WIDTH)
+    screenHeight = glutGet(GLUT_SCREEN_HEIGHT)
+    
+    # Check if window is being maximized (within 10 pixels of screen size)
+    if not isFullscreen and abs(newX - screenWidth) < 10 and abs(newY - screenHeight) < 10:
+        print("Window maximized - entering fullscreen")
+        toggleFullscreen()
+        return
+    
+    if not isFullscreen:
+        # Allow window to be resized
+        windowSize = min(newX, newY)
+        normalWindowSize = (newX, newY)
+        
+        # Update viewport
+        glViewport(0, 0, newX, newY)
+        
+        # Update projection matrix with new aspect ratio
+        glMatrixMode(GL_PROJECTION)
+        glLoadIdentity()
+        
+        aspectRatio = newX / newY if newY != 0 else 1.0
+        baseFov = 90.0
+        currentFov = baseFov / zoomLevel
+        currentFov = max(10, min(150, currentFov))
+        
+        gluPerspective(currentFov, aspectRatio, 0.1, 100)
+        glMatrixMode(GL_MODELVIEW)
+        
+        print(f"Window resized to: {newX}x{newY}, aspect ratio: {aspectRatio:.2f}")
+        glutPostRedisplay()
+    else:
+        # In fullscreen mode, update viewport to match screen size
+        glViewport(0, 0, newX, newY)
+        glutPostRedisplay()
+
+
+def toggleFullscreen():
+    global isFullscreen, normalWindowSize
+    if isFullscreen:
+        # Exit fullscreen
+        glutReshapeWindow(normalWindowSize[0], normalWindowSize[1])
+        glutPositionWindow(50, 50)
+        isFullscreen = False
+        print(f"Exiting fullscreen - restoring window to {normalWindowSize[0]}x{normalWindowSize[1]}")
+        
+        # Update the view after exiting fullscreen
+        if topView or frontView or behindView:
+            setView()
+        else:
+            setObjView()
+    else:
+        # Save current window size before going fullscreen
+        normalWindowSize = (glutGet(GLUT_WINDOW_WIDTH), glutGet(GLUT_WINDOW_HEIGHT))
+        
+        # Enter fullscreen
+        glutFullScreen()
+        isFullscreen = True
+        print("Entering fullscreen")
+        
+        # Update the view after entering fullscreen
+        if topView or frontView or behindView:
+            setView()
+        else:
+            setObjView()
+    
+    glutPostRedisplay()
+
+
 
 #--------------------------------------------making game more complex--------
 def addCone(x,z, automatic=False):
@@ -524,22 +685,39 @@ def updateAutomaticObjects():
             if i < len(obstacleCoord):
                 obstacleCoord[i] = (coneObj.posX, coneObj.posZ)
 
-def idle():
-    global tickTime, prevTime, score
-    jeepObj.rotateWheel(-0.1 * tickTime)    
-    
-    # Update automatic objects
-    updateAutomaticObjects()
-    
-    glutPostRedisplay()
-    
-    curTime = glutGet(GLUT_ELAPSED_TIME)
-    tickTime = curTime - prevTime
-    prevTime = curTime
-    score = curTime/1000
 
 def collisionCheck():
+
     global overReason, score, usedDiamond, countTime, jeepAccelerated, accelerationEndTime
+    for obstacle in obstacleCoord:
+        if dist((jeepObj.posX, jeepObj.posZ), obstacle) <= ckSense:
+            overReason = "You hit an obstacle!"
+            gameOver()
+    if (jeepObj.posX >= land or jeepObj.posX <= -land):
+        overReason = "You ran off the road!"
+        gameOver()
+
+    # Check for ribbon collision (acceleration boost)
+    for i, ribbonPos in enumerate(ribbonCoord):
+        if dist((jeepObj.posX, jeepObj.posZ), ribbonPos) <= ckSense:
+            if not jeepAccelerated:  # Only activate if not already accelerated
+                print("Acceleration ribbon activated!")
+                jeepAccelerated = True
+                curTime = glutGet(GLUT_ELAPSED_TIME)
+                accelerationEndTime = curTime + accelerationDuration
+                # Remove the ribbon after use
+                ribbonCoord.pop(i)
+                allribbons.pop(i)
+                break
+
+    if (dist((jeepObj.posX, jeepObj.posZ), (diamondObj.posX, diamondObj.posZ)) <= ckSense and usedDiamond ==False):
+        print ("Diamond bonus!")
+        countTime /= 2
+        usedDiamond = True
+    if (jeepObj.posZ >= land*gameEnlarge):
+        gameSuccess()
+
+    """global overReason, score, usedDiamond, countTime, jeepAccelerated, accelerationEndTime
     for obstacle in obstacleCoord:
         if dist((jeepObj.posX, jeepObj.posZ), obstacle) <= ckSense:
             overReason = "You hit an obstacle!"
@@ -567,7 +745,7 @@ def collisionCheck():
         usedDiamond = True
     if (jeepObj.posZ >= land*gameEnlarge):
         gameSuccess()
-
+    """
 #----------------------------------multiplayer dev (using tracker)-----------
 def recordGame():
     with open('results.csv', 'wt') as csvfile:
@@ -636,11 +814,11 @@ def showHelp():
     glColor3f(0.0,0.0,1.0)
     drawTextBitmap("1. Move the jeep using arrow keys / WASD keys" , -1.0, 0.7)
     drawTextBitmap("2. Zoom in and out by mouse scroll wheel" , -1.0, 0.55)
-    drawTextBitmap("3. Toggle views using keys: T (top), B (behind), F (front)" , -1.0, 0.4)
+    drawTextBitmap("3. Toggle views using keys: 5 (top), 2 (behind), 8 (front)" , -1.0, 0.4)
     drawTextBitmap("4. Press H to show/hide this help window" , -1.0, 0.25)
     drawTextBitmap("5. Press R to cycle resolution" , -1.0, 0.1)
     #drawTextBitmap("6. Press F to toggle fullscreen" , -1.0, -0.05)
-    drawTextBitmap("7. Right-click to change lighting options" , -1.0, -0.2)
+    drawTextBitmap("6. Right-click to change lighting options" , -1.0, -0.05)
     glutSwapBuffers()
 
 
@@ -669,9 +847,10 @@ def loadTexture(imageName):
     return tempID
 
 def loadSceneTextures():
-    global roadTextureID
+    global roadTextureID, grassTextureID
     roadTextureID = loadTexture('../img/road2.png')
-    
+    grassTextureID = loadTexture('../img/grass.png')
+
 #-----------------------------------------------lighting work--------------
 def initializeLight():
     glEnable(GL_LIGHTING)                
@@ -907,14 +1086,25 @@ def main():
     for i in range(ribbonAmount):
         newRibbonX = random.randint(-land//2, land//2)  # Keep ribbons more centered
         newRibbonZ = random.randint(30.0, land*gameEnlarge - 30.0)  # Spread throughout track
-        ribbonStar = star.star(newRibbonX, newRibbonZ)
-        # Make ribbon stars visually distinct (you can modify star.py to add a ribbon mode)
-        allribbons.append(ribbonStar)
+        newRibbon = ribbon.ribbon(newRibbonX, newRibbonZ)
+        newRibbon.loadTexture('../img/accelerating_ribbon.png')  # Load the ribbon texture
+        newRibbon.makeDisplayLists()
+        allribbons.append(newRibbon)
         ribbonCoord.append((newRibbonX, newRibbonZ))
 
     for ribbonObj in allribbons:
         ribbonObj.makeDisplayLists()
    
+    # Create street lamps on the right side of the road
+    lampX = land + 3  # Position lamps 3 units outside the right edge of the road
+    for i in range(lampAmount):
+        lampZ = (i * lampSpacing) + 10.0  # Start at z=10 and space evenly
+        newLamp = streetlamp.streetlamp(lampX, lampZ)
+        newLamp.makeDisplayLists()
+        alllamps.append(newLamp)
+        print(f"Created street lamp at ({lampX}, {lampZ})")
+   
+    
     
     staticObjects()
     if (applyLighting == True):
