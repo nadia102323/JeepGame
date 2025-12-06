@@ -8,6 +8,8 @@ import PIL.Image as Image
 import jeep, cone, star, diamond, ribbon, streetlamp
 
 windowSize = 600
+windowHeight = 600
+windowWidth = 1000
 helpWindow = False
 helpWin = 0
 mainWin = 0
@@ -118,6 +120,12 @@ lampAmount = 8  # Number of street lamps
 alllamps = []
 lampSpacing = (land * gameEnlarge) / lampAmount  # Even spacing along the road
 lampOffset = 3  # Distance from road edge to lamp position
+
+loadingProgress = 0  # Track loading progress
+totalLoadingSteps = 0  # Total number of loading steps
+currentLoadingStep = 0  # Current step being processed
+showHomeScreen = False  # Add home screen flag
+homeScreenTextureID = 0  # Add home screen texture ID
 
 
 #--------------------------------------developing scene---------------
@@ -259,7 +267,11 @@ def display():
         glMatrixMode(GL_PROJECTION)
         glPushMatrix()
         glLoadIdentity()
-        gluOrtho2D(0, windowSize, 0, windowSize)
+        
+        # Get current window dimensions
+        width = glutGet(GLUT_WINDOW_WIDTH)
+        height = glutGet(GLUT_WINDOW_HEIGHT)
+        gluOrtho2D(0, width, 0, height)
         
         glMatrixMode(GL_MODELVIEW)
         glPushMatrix()
@@ -269,8 +281,8 @@ def display():
         glColor3f(1.0, 1.0, 1.0)
         loadingText = f"Loading... {loadingProgress}%"
         textWidth = len(loadingText) * 9  # Approximate pixel width per character
-        textX = (windowSize - textWidth) / 2
-        textY = windowSize / 2  # Centered vertically
+        textX = (width - textWidth) / 2
+        textY = height / 2  # Centered vertically
         glRasterPos2f(textX, textY)
         for char in loadingText:
             glutBitmapCharacter(GLUT_BITMAP_HELVETICA_18, ord(char))
@@ -293,33 +305,61 @@ def display():
         glMatrixMode(GL_PROJECTION)
         glPushMatrix()
         glLoadIdentity()
-        gluOrtho2D(0, windowSize, 0, windowSize)
+        
+        # Get current window dimensions
+        width = glutGet(GLUT_WINDOW_WIDTH)
+        height = glutGet(GLUT_WINDOW_HEIGHT)
+        gluOrtho2D(0, width, 0, height)
         
         glMatrixMode(GL_MODELVIEW)
         glPushMatrix()
         glLoadIdentity()
         
-        # Draw game title
-        glColor3f(0.0, 1.0, 1.0)
-        titleText = "JEEP GAME"
-        titleWidth = len(titleText) * 13  # Approximate width for larger font
-        titleX = (windowSize - titleWidth) / 2
-        titleY = windowSize / 2 + 50
-        glRasterPos2f(titleX, titleY)
-        for char in titleText:
-            glutBitmapCharacter(GLUT_BITMAP_TIMES_ROMAN_24, ord(char))
+        # Draw home screen image as background
+        glEnable(GL_TEXTURE_2D)
+        glBindTexture(GL_TEXTURE_2D, homeScreenTextureID)
+        glColor3f(1.0, 1.0, 1.0)  # White color to show image as-is
+        
+        glBegin(GL_QUADS)
+        glTexCoord2f(0.0, 0.0)
+        glVertex2f(0, 0)
+        glTexCoord2f(1.0, 0.0)
+        glVertex2f(width, 0)
+        glTexCoord2f(1.0, 1.0)
+        glVertex2f(width, height)
+        glTexCoord2f(0.0, 1.0)
+        glVertex2f(0, height)
+        glEnd()
+        
+        glDisable(GL_TEXTURE_2D)
+        
+        # Disable depth testing for text rendering
+        glDisable(GL_DEPTH_TEST)
         
         # Draw "Press SPACE to Start" text (blinking effect)
         blinkTime = int(glutGet(GLUT_ELAPSED_TIME) / 500) % 2  # Blink every 500ms
         if blinkTime == 0:
-            glColor3f(1.0, 1.0, 0.0)
+            glColor3f(1.0, 1.0, 0.0)  # Yellow color
             startText = "Press SPACE to Start"
-            startWidth = len(startText) * 9
-            startX = (windowSize - startWidth) / 2
-            startY = windowSize / 2 - 50
-            glRasterPos2f(startX, startY)
-            for char in startText:
-                glutBitmapCharacter(GLUT_BITMAP_HELVETICA_18, ord(char))
+            
+            # Use GLUT_BITMAP_9_BY_15 and draw multiple times for bold effect
+            selectedFont = GLUT_BITMAP_9_BY_15
+            charWidth = 9
+            
+            startWidth = len(startText) * charWidth
+            startX = (width - startWidth) / 2
+            startY = height * 0.2  # Position at 20% from bottom
+            
+            # Draw text multiple times with slight offsets to simulate bold
+            offsets = [(0, 0), (1, 0), (0, 1), (1, 1)]  # Right, down, and diagonal
+            
+            for offset in offsets:
+                glRasterPos2f(startX + offset[0], startY + offset[1])
+                for char in startText:
+                    glutBitmapCharacter(selectedFont, ord(char))
+        
+        # Re-enable depth testing
+        glEnable(GL_DEPTH_TEST)
         
         # Restore projection matrix
         glPopMatrix()
@@ -938,31 +978,30 @@ def showHelp():
 #----------------------------------------------texture development-----------
 def loadTexture(imageName):
     texturedImage = Image.open(imageName)
-    try:
-        imgX = texturedImage.size[0]
-        imgY = texturedImage.size[1]
-        img = texturedImage.tobytes("raw","RGBX",0,-1)#tostring("raw", "RGBX", 0, -1)
-    except Exception:
-        print ("Error:")
-        print ("Switching to RGBA mode.")
-        imgX = texturedImage.size[0]
-        imgY = texturedImage.size[1]
-        img = texturedImage.tobytes("raw","RGB",0,-1)#tostring("raw", "RGBA", 0, -1)
+    
+    # Convert image to RGBA mode to ensure consistent handling
+    if texturedImage.mode != 'RGBA':
+        texturedImage = texturedImage.convert('RGBA')
+    
+    imgX = texturedImage.size[0]
+    imgY = texturedImage.size[1]
+    img = texturedImage.tobytes("raw", "RGBA", 0, -1)
 
     tempID = glGenTextures(1)
     glBindTexture(GL_TEXTURE_2D, tempID)
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_MIRRORED_REPEAT)
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_MIRRORED_REPEAT)
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST)
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST)
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR)
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR)
     glPixelStorei(GL_UNPACK_ALIGNMENT, 1)
-    glTexImage2D(GL_TEXTURE_2D, 0, 3, imgX, imgY, 0, GL_RGBA, GL_UNSIGNED_BYTE, img)
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, imgX, imgY, 0, GL_RGBA, GL_UNSIGNED_BYTE, img)
     return tempID
 
 def loadSceneTextures():
-    global roadTextureID, grassTextureID
+    global roadTextureID, grassTextureID, homeScreenTextureID
     roadTextureID = loadTexture('../img/road2.png')
     grassTextureID = loadTexture('../img/grass.png')
+    homeScreenTextureID = loadTexture('../img/home_screen.png')
 
 #-----------------------------------------------lighting work--------------
 def initializeLight():
@@ -1138,7 +1177,7 @@ def main():
     prevTime = glutGet(GLUT_ELAPSED_TIME)
     
     glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGBA | GLUT_DEPTH)
-    glutInitWindowSize(windowSize, windowSize)
+    glutInitWindowSize(windowWidth, windowHeight)
     glutInitWindowPosition(0, 0)
     mainWin = glutCreateWindow(b'CS4182')
     glutDisplayFunc(display)
