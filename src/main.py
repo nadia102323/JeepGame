@@ -24,6 +24,11 @@ score = 0
 finalScore = 0
 canStart = False
 overReason = ""
+isLoading = True  # Add loading flag
+loadingProgress = 0  # Track loading progress
+totalLoadingSteps = 0  # Total number of loading steps
+currentLoadingStep = 0  # Current step being processed
+showHomeScreen = False  # Add home screen flag
 
 #for wheel spinning
 tickTime = 0
@@ -112,6 +117,7 @@ matShininess  = 100.0
 lampAmount = 8  # Number of street lamps
 alllamps = []
 lampSpacing = (land * gameEnlarge) / lampAmount  # Even spacing along the road
+lampOffset = 3  # Distance from road edge to lamp position
 
 
 #--------------------------------------developing scene---------------
@@ -227,8 +233,104 @@ def staticObjects():
     print ('append')
 
 
+def updateLoadingProgress(stepName=""):
+    """Update loading progress and display"""
+    global currentLoadingStep, loadingProgress
+    currentLoadingStep += 1
+    loadingProgress = int((currentLoadingStep / totalLoadingSteps) * 100)
+    if stepName:
+        print(f"Loading: {stepName} ({loadingProgress}%)")
+    
+    # Force immediate display update
+    display()
+    
+    # Process events to allow display to refresh
+    glutMainLoopEvent()
+
 def display():
-    global jeepObj, canStart, score, beginTime, countTime, jeepAccelerated
+    global jeepObj, canStart, score, beginTime, countTime, jeepAccelerated, isLoading, loadingProgress, showHomeScreen
+    
+    # Show loading screen with progress text only
+    if isLoading:
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
+        glDisable(GL_LIGHTING)
+        
+        # Set up orthographic projection for 2D rendering
+        glMatrixMode(GL_PROJECTION)
+        glPushMatrix()
+        glLoadIdentity()
+        gluOrtho2D(0, windowSize, 0, windowSize)
+        
+        glMatrixMode(GL_MODELVIEW)
+        glPushMatrix()
+        glLoadIdentity()
+        
+        # Draw "Loading..." text (centered)
+        glColor3f(1.0, 1.0, 1.0)
+        loadingText = f"Loading... {loadingProgress}%"
+        textWidth = len(loadingText) * 9  # Approximate pixel width per character
+        textX = (windowSize - textWidth) / 2
+        textY = windowSize / 2  # Centered vertically
+        glRasterPos2f(textX, textY)
+        for char in loadingText:
+            glutBitmapCharacter(GLUT_BITMAP_HELVETICA_18, ord(char))
+        
+        # Restore projection matrix
+        glPopMatrix()
+        glMatrixMode(GL_PROJECTION)
+        glPopMatrix()
+        glMatrixMode(GL_MODELVIEW)
+        
+        glutSwapBuffers()
+        return
+    
+    # Show home screen
+    if showHomeScreen:
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
+        glDisable(GL_LIGHTING)
+        
+        # Set up orthographic projection for 2D rendering
+        glMatrixMode(GL_PROJECTION)
+        glPushMatrix()
+        glLoadIdentity()
+        gluOrtho2D(0, windowSize, 0, windowSize)
+        
+        glMatrixMode(GL_MODELVIEW)
+        glPushMatrix()
+        glLoadIdentity()
+        
+        # Draw game title
+        glColor3f(0.0, 1.0, 1.0)
+        titleText = "JEEP GAME"
+        titleWidth = len(titleText) * 13  # Approximate width for larger font
+        titleX = (windowSize - titleWidth) / 2
+        titleY = windowSize / 2 + 50
+        glRasterPos2f(titleX, titleY)
+        for char in titleText:
+            glutBitmapCharacter(GLUT_BITMAP_TIMES_ROMAN_24, ord(char))
+        
+        # Draw "Press SPACE to Start" text (blinking effect)
+        blinkTime = int(glutGet(GLUT_ELAPSED_TIME) / 500) % 2  # Blink every 500ms
+        if blinkTime == 0:
+            glColor3f(1.0, 1.0, 0.0)
+            startText = "Press SPACE to Start"
+            startWidth = len(startText) * 9
+            startX = (windowSize - startWidth) / 2
+            startY = windowSize / 2 - 50
+            glRasterPos2f(startX, startY)
+            for char in startText:
+                glutBitmapCharacter(GLUT_BITMAP_HELVETICA_18, ord(char))
+        
+        # Restore projection matrix
+        glPopMatrix()
+        glMatrixMode(GL_PROJECTION)
+        glPopMatrix()
+        glMatrixMode(GL_MODELVIEW)
+        
+        glutSwapBuffers()
+        glutPostRedisplay()  # Keep updating for blinking effect
+        return
+    
     if not topView and not frontView and not behindView:
         setObjView()
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
@@ -316,8 +418,11 @@ def display():
     jeepObj.drawW2()
     jeepObj.drawLight()
     #personObj.draw()
-    #starObj.followJeep(jeepObj)
-    starObj.draw()
+    
+    # Only draw allstars if they exist
+    for starObj in allstars:
+        starObj.draw()
+    
     glutSwapBuffers()
 
 def idle():#--------------with more complex display items like turning wheel---
@@ -498,7 +603,15 @@ def specialKeys(keypress, mX, mY):
     pass
 
 def myKeyboard(key, mX, mY):
-    global eyeX, eyeY, eyeZ, angle, radius, helpWindow, centered, helpWin, overReason, topView, behindView, frontView, isFullscreen, jeepAccelerated
+    global eyeX, eyeY, eyeZ, angle, radius, helpWindow, centered, helpWin, overReason, topView, behindView, frontView, isFullscreen, jeepAccelerated, showHomeScreen
+    
+    # Handle space key to start game from home screen
+    if key == b' ' and showHomeScreen:
+        showHomeScreen = False
+        print("Starting game!")
+        glutPostRedisplay()
+        return
+    
     if key == b"h":
         print ("h pushed"+ str(helpWindow))
         winNum = glutGetWindow()
@@ -1008,21 +1121,28 @@ def myMenu(option):
     glutPostRedisplay()
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~the finale!!!~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+def finishLoading():
+    """Called when all objects are loaded"""
+    global isLoading, showHomeScreen
+    isLoading = False
+    showHomeScreen = True  # Show home screen after loading
+    print("All objects loaded! Showing home screen.")
+    glutPostRedisplay()
+
+    
 def main():
     glutInit()
 
-    global prevTime, mainWin
+    global prevTime, mainWin, loadingProgress, isLoading, totalLoadingSteps, currentLoadingStep
     prevTime = glutGet(GLUT_ELAPSED_TIME)
     
     glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGBA | GLUT_DEPTH)
-    # things to do
-    # change the window resolution in the game
     glutInitWindowSize(windowSize, windowSize)
-    
     glutInitWindowPosition(0, 0)
     mainWin = glutCreateWindow(b'CS4182')
     glutDisplayFunc(display)
-    glutIdleFunc(idle)#wheel turn
+    glutIdleFunc(idle)
 
     setView()
     glLoadIdentity()
@@ -1030,12 +1150,11 @@ def main():
 
     glutMouseFunc(mouseHandle)
     glutMotionFunc(motionHandle)
-    glutMouseWheelFunc(mouseWheelHandle)  # Register mouse wheel callback
+    glutMouseWheelFunc(mouseWheelHandle)
     glutSpecialFunc(specialKeys)
     glutKeyboardFunc(myKeyboard)
     glutReshapeFunc(noReshape)
-    # things to do
-    # add a menu 
+    
     glutCreateMenu(myMenu)
     glutAddMenuEntry("Ambient Light", 1)
     glutAddMenuEntry("Point Light", 2)
@@ -1044,71 +1163,127 @@ def main():
     glutAddMenuEntry("No Lighting", 5)
     glutAttachMenu(GLUT_RIGHT_BUTTON)
 
+    # Calculate total loading steps
+    totalLoadingSteps = (
+        1 +  # Load textures
+        3 +  # Load jeep models (3 jeeps)
+        (coneAmount - 2) +  # Create regular cones
+        2 +  # Create automatic cones
+        (coneAmount) +  # Make cone display lists
+        starAmount +  # Create stars
+        starAmount +  # Make star display lists
+        1 +  # Create diamond
+        ribbonAmount * 2 +  # Create and setup ribbons
+        (lampAmount * 2) +  # Create street lamps
+        1 +  # Create static objects
+        1   # Initialize lighting
+    )
+    
+    print(f"Total loading steps: {totalLoadingSteps}")
+    
+    currentLoadingStep = 0
+    loadingProgress = 0
+    isLoading = True
+
+    # Show initial loading screen
+    display()
+    # filepath: c:\Users\NADIA\CS4182\project\src\main.py
+    glutSwapBuffers()
+    glutMainLoopEvent()
+    
+    # Add small delay to ensure window is fully initialized
+    import time
+    time.sleep(0.1)
+
+    # Load textures
+    updateLoadingProgress("Loading textures")
     loadSceneTextures()
 
+    # Load jeep models
+    updateLoadingProgress("Loading jeep 1")
     jeep1Obj.makeDisplayLists()
+    
+    updateLoadingProgress("Loading jeep 2")
     jeep2Obj.makeDisplayLists()
+    
+    updateLoadingProgress("Loading jeep 3")
     jeep3Obj.makeDisplayLists()
-    #personObj.makeDisplayLists()
-    #starObj.makeDisplayLists() # Add this line to create display lists for stars
 
-    # things to do
-    # add a automatic object
-    """for i in range(coneAmount):#create cones randomly for obstacles, making sure to give a little lag time in beginning by adding 10.0 buffer
+    # Create cones
+    for i in range(coneAmount - 2):
+        updateLoadingProgress(f"Creating obstacle {i+1}/{coneAmount-2}")
         addCone(random.randint(-land, land), random.randint(10.0, land*gameEnlarge))
-    """
-
-    for i in range(coneAmount - 2):  # Reduce by 2 to make room for automatic ones
-        addCone(random.randint(-land, land), random.randint(10.0, land*gameEnlarge))
-        
-    # Add 2 automatic cones that move around
+    
+    updateLoadingProgress("Creating automatic obstacle 1")
     addCone(random.randint(-land//2, land//2), random.randint(20.0, 40.0), automatic=True)
+    
+    updateLoadingProgress("Creating automatic obstacle 2")
     addCone(random.randint(-land//2, land//2), random.randint(60.0, 80.0), automatic=True)
 
-
-    for cone in allcones:
+    # Make cone display lists
+    for i, cone in enumerate(allcones):
+        updateLoadingProgress(f"Processing obstacle {i+1}/{len(allcones)}")
         cone.makeDisplayLists()
 
-    # things to do
-    # add stars
-    for i in range(starAmount):#create stars randomly for rewards, making sure to give a little lag time in beginning by adding 10.0 buffer
+    # Create stars
+    for i in range(starAmount):
+        updateLoadingProgress(f"Creating reward {i+1}/{starAmount}")
         newStarX = random.randint(-land, land)
         newStarZ = random.randint(10.0, land*gameEnlarge)
         allstars.append(star.star(newStarX, newStarZ))
         rewardCoord.append((newStarX, newStarZ))
 
-    for starObj in allstars:
+    # Make star display lists
+    for i, starObj in enumerate(allstars):
+        updateLoadingProgress(f"Processing reward {i+1}/{len(allstars)}")
         starObj.makeDisplayLists()
 
-    
+    # Create diamond
+    updateLoadingProgress("Creating special item")
     diamondObj.makeDisplayLists()
 
+    # Create ribbons
     for i in range(ribbonAmount):
-        newRibbonX = random.randint(-land//2, land//2)  # Keep ribbons more centered
-        newRibbonZ = random.randint(30.0, land*gameEnlarge - 30.0)  # Spread throughout track
+        updateLoadingProgress(f"Creating acceleration ribbon {i+1}/{ribbonAmount}")
+        newRibbonX = random.randint(-land//2, land//2)
+        newRibbonZ = random.randint(30.0, land*gameEnlarge - 30.0)
         newRibbon = ribbon.ribbon(newRibbonX, newRibbonZ)
-        newRibbon.loadTexture('../img/accelerating_ribbon.png')  # Load the ribbon texture
+        
+        updateLoadingProgress(f"Loading ribbon texture {i+1}/{ribbonAmount}")
+        newRibbon.loadTexture('../img/accelerating_ribbon.png')
         newRibbon.makeDisplayLists()
         allribbons.append(newRibbon)
         ribbonCoord.append((newRibbonX, newRibbonZ))
 
-    for ribbonObj in allribbons:
-        ribbonObj.makeDisplayLists()
-   
-    # Create street lamps on the right side of the road
-    lampX = land + 3  # Position lamps 3 units outside the right edge of the road
+    # Create street lamps
+    leftLampX = -land - lampOffset
+    rightLampX = land + lampOffset
+    
     for i in range(lampAmount):
-        lampZ = (i * lampSpacing) + 10.0  # Start at z=10 and space evenly
-        newLamp = streetlamp.streetlamp(lampX, lampZ)
-        newLamp.makeDisplayLists()
-        alllamps.append(newLamp)
-        print(f"Created street lamp at ({lampX}, {lampZ})")
-   
-    
-    
+        lampZ = (i * lampSpacing) + 10.0
+        
+        updateLoadingProgress(f"Creating street lamp {(i*2)+1}/{lampAmount*2}")
+        rightLamp = streetlamp.streetlamp(rightLampX, lampZ)
+        rightLamp.makeDisplayLists()
+        alllamps.append(rightLamp)
+        
+        updateLoadingProgress(f"Creating street lamp {(i*2)+2}/{lampAmount*2}")
+        leftLamp = streetlamp.streetlamp(leftLampX, lampZ)
+        leftLamp.makeDisplayLists()
+        alllamps.append(leftLamp)
+
+    # Create static objects
+    updateLoadingProgress("Creating scene")
     staticObjects()
+    
+    # Initialize lighting
+    updateLoadingProgress("Initializing lighting")
     if (applyLighting == True):
         initializeLight()
+    
+    # Finish loading
+    finishLoading()
+    
     glutMainLoop()
     
 main()
