@@ -12,6 +12,15 @@ class streetlamp:
         self.rotation = 0.0
         self.obj = ImportObject.ImportedObject('../objects/Street_Lamp')
         
+        # Light bulb properties for 2 bulbs
+        self.bulbHeight1 = 14.0  # Height of first bulb (adjust based on your model)
+        self.bulbHeight2 = 14.0  # Height of second bulb (same height)
+        self.bulbOffsetX = 1.5  # Horizontal offset from center for each bulb
+        self.bulbRadius = 0.2  # Size of the light bulb sphere
+        self.bulbColor = [1.0, 1.0, 0.8]  # Warm white/yellow color
+        self.emissiveColor = [1.0, 1.0, 0.8, 1.0]  # Emissive color for glowing effect
+
+        
     def makeDisplayLists(self):
         """Create display list for the street lamp"""
         self.obj.loadOBJ()
@@ -90,16 +99,47 @@ class streetlamp:
                 
                 break
     
+    def drawLightBulb(self):
+        """Draw two glowing light bulbs at the top of the lamp"""
+        # Disable lighting for the bulbs to make them appear to glow
+        wasLightingEnabled = glIsEnabled(GL_LIGHTING)
+        glDisable(GL_LIGHTING)
+        
+        # Set emissive color for glow effect
+        glColor3f(self.bulbColor[0], self.bulbColor[1], self.bulbColor[2])
+        
+        # Draw first bulb (left side)
+        glPushMatrix()
+        glTranslatef(-self.bulbOffsetX, self.bulbHeight1, 0)
+        glutSolidSphere(self.bulbRadius, 16, 16)
+        glPopMatrix()
+        
+        # Draw second bulb (right side)
+        glPushMatrix()
+        glTranslatef(self.bulbOffsetX, self.bulbHeight2, 0)
+        glutSolidSphere(self.bulbRadius, 16, 16)
+        glPopMatrix()
+        
+        # Re-enable lighting if it was on
+        if wasLightingEnabled:
+            glEnable(GL_LIGHTING)
+    
     def draw(self):
         """Draw the street lamp at its position"""
         glPushMatrix()
         glTranslatef(self.posX, self.posY, self.posZ)
-        glScalef(self.scale, self.scale, self.scale)
         glRotatef(self.rotation, 0, 1, 0)
+        glScalef(self.scale, self.scale, self.scale)
         
         if hasattr(self, 'displayList'):
             glCallList(self.displayList)
         else:
             self.drawLamp()
         
+        glPopMatrix()
+        
+        # Draw the light bulbs (outside the scaled transformation)
+        glPushMatrix()
+        glTranslatef(self.posX, self.posY, self.posZ)
+        self.drawLightBulb()
         glPopMatrix()

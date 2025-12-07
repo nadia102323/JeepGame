@@ -6,6 +6,7 @@ import math, time, random, csv, datetime
 import ImportObject
 import PIL.Image as Image
 import jeep, cone, star, diamond, ribbon, streetlamp
+import shader_utils
 
 windowSize = 600
 windowHeight = 600
@@ -31,6 +32,7 @@ loadingProgress = 0  # Track loading progress
 totalLoadingSteps = 0  # Total number of loading steps
 currentLoadingStep = 0  # Current step being processed
 showHomeScreen = False  # Add home screen flag
+gameStartTime = 0  # Add game start time tracker
 
 #for wheel spinning
 tickTime = 0
@@ -76,6 +78,10 @@ zoomLevel = 1.0  # Add zoom level variable
 #concerned with panning
 nowX = 0.0
 nowY = 0.0
+prevMouseX = 0.0  # Add previous mouse position tracking
+prevMouseY = 0.0
+leftMouseDown = False  # Track left mouse button state
+rightMouseDown = False  # Track right mouse button state
 
 angle = 0.0
 radius = 10.0
@@ -121,12 +127,24 @@ alllamps = []
 lampSpacing = (land * gameEnlarge) / lampAmount  # Even spacing along the road
 lampOffset = 3  # Distance from road edge to lamp position
 
+lampLightsEnabled = False  # Toggle for lamp lights
+GL_LIGHT_LAMP_START = GL_LIGHT2  # Start from LIGHT2 (LIGHT0 and LIGHT1 may be used)
+
 loadingProgress = 0  # Track loading progress
 totalLoadingSteps = 0  # Total number of loading steps
 currentLoadingStep = 0  # Current step being processed
 showHomeScreen = False  # Add home screen flag
 homeScreenTextureID = 0  # Add home screen texture ID
 
+useShaders = False
+blinnPhongShader = None
+currentShadingModel = "fixed"  # "fixed" or "blinn-phong"
+
+
+starsCollected = 0
+
+# Add a new global variable to track which ribbons have been used
+usedRibbons = set()  # Track indices of ribbons already used
 
 #--------------------------------------developing scene---------------
 class Scene:
@@ -255,8 +273,68 @@ def updateLoadingProgress(stepName=""):
     # Process events to allow display to refresh
     glutMainLoopEvent()
 
+def initializeShaders():
+    """Initialize shader programs"""
+    global blinnPhongShader
+    try:
+        blinnPhongShader = shader_utils.ShaderProgram(
+            '../shaders/blinn_phong.vert',
+            '../shaders/blinn_phong.frag'
+        )
+        print("Blinn-Phong shader loaded successfully")
+    except Exception as e:
+        print(f"Failed to load shaders: {e}")
+        blinnPhongShader = None
+
+def setupShaderUniforms():
+    """Setup shader uniforms for current frame"""
+    if not blinnPhongShader or not useShaders:
+        return
+    
+    blinnPhongShader.use()
+    
+    # Get current matrices
+    modelview = glGetFloatv(GL_MODELVIEW_MATRIX)
+    projection = glGetFloatv(GL_PROJECTION_MATRIX)
+    
+    # Calculate normal matrix (transpose of inverse of upper-left 3x3 of modelview)
+    import numpy as np
+    mv_3x3 = modelview[:3, :3]
+    normal_matrix = np.linalg.inv(mv_3x3).T
+    
+    # Set matrices
+    blinnPhongShader.set_mat4("modelMatrix", np.eye(4))
+    blinnPhongShader.set_mat4("viewMatrix", modelview)
+    blinnPhongShader.set_mat4("projectionMatrix", projection)
+    blinnPhongShader.set_mat3("normalMatrix", normal_matrix)
+    
+    # Set material properties
+    blinnPhongShader.set_vec3("materialAmbient", matAmbient[0], matAmbient[1], matAmbient[2])
+    blinnPhongShader.set_vec3("materialDiffuse", matDiffuse[0], matDiffuse[1], matDiffuse[2])
+    blinnPhongShader.set_vec3("materialSpecular", matSpecular[0], matSpecular[1], matSpecular[2])
+    blinnPhongShader.set_float("materialShininess", matShininess)
+    
+    # Set light properties based on current light type
+    if currentLightType == "point":
+        blinnPhongShader.set_vec3("lightPosition", light0_Position[0], light0_Position[1], light0_Position[2])
+    elif currentLightType == "spotlight":
+        blinnPhongShader.set_vec3("lightPosition", jeepObj.posX, jeepObj.posY + 10.0, jeepObj.posZ)
+    else:
+        blinnPhongShader.set_vec3("lightPosition", 0.0, 10.0, 0.0)
+    
+    blinnPhongShader.set_vec3("lightAmbient", 0.2, 0.2, 0.2)
+    blinnPhongShader.set_vec3("lightDiffuse", 0.8, 0.8, 0.8)
+    blinnPhongShader.set_vec3("lightSpecular", 1.0, 1.0, 1.0)
+    
+    # Set view position (camera position)
+    blinnPhongShader.set_vec3("viewPosition", eyeX, eyeY, eyeZ)
+    
+    # Texture settings
+    blinnPhongShader.set_int("textureSampler", 0)
+    blinnPhongShader.set_bool("useTexture", False)
+
 def display():
-    global jeepObj, canStart, score, beginTime, countTime, jeepAccelerated, isLoading, loadingProgress, showHomeScreen
+    global jeepObj, canStart, score, beginTime, countTime, jeepAccelerated, isLoading, loadingProgress, showHomeScreen, starsCollected
     
     # Show loading screen with progress text only
     if isLoading:
@@ -375,69 +453,86 @@ def display():
         setObjView()
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
 
-    # Apply lighting based on menu selection
-    if applyLighting == True and currentLightType != "none":
-        # Set material properties for objects
+    # Apply lighting or shaders based on mode
+    if useShaders and blinnPhongShader:
+        glDisable(GL_LIGHTING)
+        setupShaderUniforms()
+    elif applyLighting == True and currentLightType != "none":
+        glEnable(GL_LIGHTING)
         glMaterialfv(GL_FRONT, GL_AMBIENT, matAmbient)
         glMaterialfv(GL_FRONT, GL_DIFFUSE, matDiffuse)
         glMaterialfv(GL_FRONT, GL_SPECULAR, matSpecular)
         glMaterialfv(GL_FRONT, GL_SHININESS, matShininess)
         
-        # Update spotlight position dynamically if spotlight is active
         if currentLightType == "spotlight":
             spotlight_pos = [jeepObj.posX, jeepObj.posY + 10.0, jeepObj.posZ, 1.0]
             glLightfv(GL_LIGHT0, GL_POSITION, spotlight_pos)
         
-        # Visualize light source for point lights and spotlights
         if currentLightType in ["point", "spotlight"]:
-            # Temporarily disable lighting to draw light source indicator
             glDisable(GL_LIGHTING)
-            glColor3f(1.0, 1.0, 0.0)  # Yellow sphere for light source
+            glColor3f(1.0, 1.0, 0.0)
             glPushMatrix()
             
             if currentLightType == "point":
                 glTranslatef(light0_Position[0], light0_Position[1], light0_Position[2])
-            else:  # spotlight
+            else:
                 glTranslatef(jeepObj.posX, jeepObj.posY + 10.0, jeepObj.posZ)
             
             glutSolidSphere(0.5, 16, 12)
             glPopMatrix()
-            
-            # Re-enable lighting
             glEnable(GL_LIGHTING)
     
-    # Display current lighting type on screen
-    glDisable(GL_LIGHTING)  # Temporarily disable for text rendering
+    wasLightingEnabled = glIsEnabled(GL_LIGHTING)
+    glDisable(GL_LIGHTING)
+    
+    if useShaders and blinnPhongShader:
+        blinnPhongShader.stop()
+    
     glColor3f(1.0, 1.0, 1.0)
+    shadingInfo = f"Shading: {currentShadingModel.title()}"
+    text3d(shadingInfo, -18, 9, 0)
     text3d(f"Lighting: {currentLightType.title()}", -18, 8, 0)
 
-    # Re-enable lighting if it should be active
-    if applyLighting == True and currentLightType != "none":
+    if useShaders and blinnPhongShader:
+        setupShaderUniforms()
+    elif wasLightingEnabled:
         glEnable(GL_LIGHTING)
    
     beginTime = 6-score
     countTime = score-6
     if (score <= 5):
         canStart = False
-        glDisable(GL_LIGHTING)  # Disable for text
+        glDisable(GL_LIGHTING)
+        if useShaders and blinnPhongShader:
+            blinnPhongShader.stop()
         glColor3f(1.0,0.0,1.0)
-        text3d("Begins in: "+str(beginTime), jeepObj.posX, jeepObj.posY + 3.0, jeepObj.posZ)
-        if applyLighting and currentLightType != "none":
+        text3d("Begins in: "+str(int(beginTime)), jeepObj.posX, jeepObj.posY + 3.0, jeepObj.posZ)
+        if wasLightingEnabled:
             glEnable(GL_LIGHTING)
-    elif (score == 6):
+        if useShaders and blinnPhongShader:
+            setupShaderUniforms()
+    elif (score <= 6):
         canStart = True
-        glDisable(GL_LIGHTING)  # Disable for text
+        glDisable(GL_LIGHTING)
+        if useShaders and blinnPhongShader:
+            blinnPhongShader.stop()
         glColor3f(1.0,0.0,1.0)
         text3d("GO!", jeepObj.posX, jeepObj.posY + 3.0, jeepObj.posZ)
-        if applyLighting and currentLightType != "none":
+        if wasLightingEnabled:
             glEnable(GL_LIGHTING)
+        if useShaders and blinnPhongShader:
+            setupShaderUniforms()
     else:
         canStart = True
-        glDisable(GL_LIGHTING)  # Disable for text
+        glDisable(GL_LIGHTING)
+        if useShaders and blinnPhongShader:
+            blinnPhongShader.stop()
         glColor3f(0.0,1.0,1.0)
-        text3d("Scoring: "+str(countTime), jeepObj.posX, jeepObj.posY + 3.0, jeepObj.posZ)
-        if applyLighting and currentLightType != "none":
+        text3d("Scoring: "+str(int(countTime)), jeepObj.posX, jeepObj.posY + 3.0, jeepObj.posZ)
+        if wasLightingEnabled:
             glEnable(GL_LIGHTING)
+        if useShaders and blinnPhongShader:
+            setupShaderUniforms()
 
     for obj in objectArray:
         obj.draw()
@@ -457,20 +552,59 @@ def display():
     jeepObj.drawW1()
     jeepObj.drawW2()
     jeepObj.drawLight()
-    #personObj.draw()
     
-    # Only draw allstars if they exist
-    for starObj in allstars:
-        starObj.draw()
+    if useShaders and blinnPhongShader:
+        blinnPhongShader.stop()
+    
+    # Draw star counter in 2D screen space (upper right corner)
+    glMatrixMode(GL_PROJECTION)
+    glPushMatrix()
+    glLoadIdentity()
+    
+    # Get current window dimensions
+    width = glutGet(GLUT_WINDOW_WIDTH)
+    height = glutGet(GLUT_WINDOW_HEIGHT)
+    gluOrtho2D(0, width, 0, height)
+    
+    glMatrixMode(GL_MODELVIEW)
+    glPushMatrix()
+    glLoadIdentity()
+    
+    # Disable depth test for 2D overlay
+    glDisable(GL_DEPTH_TEST)
+    glDisable(GL_LIGHTING)
+    
+    # Draw star counter text
+    glColor3f(1.0, 1.0, 0.0)  # Yellow color for stars
+    starCountText = f"Stars: {starsCollected}/{starAmount}"
+    
+    # Calculate text width (approximate)
+    textWidth = len(starCountText) * 9  # Approximate pixel width per character
+    textX = width - textWidth - 20  # 20 pixels from right edge
+    textY = height - 30  # 30 pixels from top
+    
+    glRasterPos2f(textX, textY)
+    for char in starCountText:
+        glutBitmapCharacter(GLUT_BITMAP_9_BY_15, ord(char))
+    
+    # Restore depth test
+    glEnable(GL_DEPTH_TEST)
+    
+    # Restore matrices
+    glPopMatrix()
+    glMatrixMode(GL_PROJECTION)
+    glPopMatrix()
+    glMatrixMode(GL_MODELVIEW)
     
     glutSwapBuffers()
 
 def idle():#--------------with more complex display items like turning wheel---
-    global tickTime, prevTime, score, jeepAccelerated, accelerationEndTime
+    global tickTime, prevTime, score, jeepAccelerated, accelerationEndTime, gameStartTime
     jeepObj.rotateWheel(-0.1 * tickTime)    
     
-    # Check if acceleration has expired
     curTime = glutGet(GLUT_ELAPSED_TIME)
+    
+    # Check if acceleration has expired
     if jeepAccelerated and curTime > accelerationEndTime:
         jeepAccelerated = False
         print("Acceleration ended - returning to normal speed")
@@ -482,8 +616,12 @@ def idle():#--------------with more complex display items like turning wheel---
     
     tickTime = curTime - prevTime
     prevTime = curTime
-    score = curTime/1000
     
+    # Only update score if game has started (after home screen)
+    if gameStartTime > 0:
+        score = (curTime - gameStartTime) / 1000
+    else:
+        score = 0
 
 #---------------------------------setting camera----------------------------
 def setView():
@@ -505,27 +643,39 @@ def setView():
     
     if (topView == True):
         cameraHeight = 30.0  # Much higher than before
-        gluLookAt(jeepObj.posX, cameraHeight, jeepObj.posZ,  # Camera position above jeep
+        gluLookAt(jeepObj.posX, cameraHeight, jeepObj.posZ,  # Camera position above jeep (follows jeep)
                   jeepObj.posX, jeepObj.posY, jeepObj.posZ,  # Look at jeep
                   0, 0, 1)         
         print("top view")
-    elif (frontView ==True):
-        gluLookAt(eyeX, eyeY, eyeZ, 0, 0, 0, 0, 1, 0)
+    elif (behindView == True):
+        # Camera behind the jeep
+        cameraDistance = 20.0
+        cameraHeight = 10.0
+        gluLookAt(jeepObj.posX, jeepObj.posY + cameraHeight, jeepObj.posZ - cameraDistance,  # Camera behind jeep (follows jeep)
+                  jeepObj.posX, jeepObj.posY, jeepObj.posZ,  # Look at jeep
+                  0, 1, 0)
+        print("behind view")
+    elif (frontView == True):
+        # Camera in front of the jeep
+        cameraDistance = 20.0
+        cameraHeight = 10.0
+        gluLookAt(jeepObj.posX, jeepObj.posY + cameraHeight, jeepObj.posZ + cameraDistance,  # Camera in front of jeep (follows jeep)
+                  jeepObj.posX, jeepObj.posY, jeepObj.posZ,  # Look at jeep
+                  0, 1, 0)
         print("front view")
     else:
-        #gluLookAt(jeepObj.posX, jeepObj.posY + 10.0, jeepObj.posZ - 20.0, jeepObj.posX, jeepObj.posY, jeepObj.posZ, 0, 1, 0) 
-        #print("default view")
         setObjView()
-        return
+        return  # Return to avoid double matrix mode setting
+    
     glMatrixMode(GL_MODELVIEW)
     glutPostRedisplay()
-    
+
 
 def setObjView():
     # things to do
     # realize a view following the jeep
     # refer to setview
-    global eyeX, eyeY, eyeZ
+    global eyeX, eyeY, eyeZ, angle, phi, radius
     glMatrixMode(GL_PROJECTION)
     glLoadIdentity()
     
@@ -541,73 +691,149 @@ def setObjView():
     
     gluPerspective(currentFov, aspectRatio, 0.1, 100)
     
-    # Camera follows the jeep from behind and slightly above
-    cameraDistance = 20.0
-    cameraHeight = 10.0
-    
-    # Position camera behind the jeep
-    cameraX = jeepObj.posX
-    cameraY = jeepObj.posY + cameraHeight
-    cameraZ = jeepObj.posZ - cameraDistance
-    
-    # Look at the jeep
-    gluLookAt(cameraX, cameraY, cameraZ,  # Camera position
-              jeepObj.posX, jeepObj.posY, jeepObj.posZ,  # Look at jeep
-              0, 1, 0)  # Up vector
-    
+    # Use custom camera position if angles have been modified by mouse drag
+    if abs(angle) > 0.1 or abs(phi) > 0.1:
+        # Camera is being controlled by mouse - use spherical coordinates centered on jeep
+        angleRad = math.radians(angle)
+        phiRad = math.radians(phi)
+        
+        # Calculate camera position relative to jeep using spherical coordinates
+        eyeX = jeepObj.posX + radius * math.cos(phiRad) * math.sin(angleRad)
+        eyeY = jeepObj.posY + radius * math.sin(phiRad) + 2.0
+        eyeZ = jeepObj.posZ + radius * math.cos(phiRad) * math.cos(angleRad)
+        
+        gluLookAt(eyeX, eyeY, eyeZ,  # Camera position (follows jeep)
+                  jeepObj.posX, jeepObj.posY, jeepObj.posZ,  # Look at jeep
+                  0, 1, 0)  # Up vector
+    else:
+        # Default camera follows the jeep from behind (back view)
+        cameraDistance = 20.0
+        cameraHeight = 10.0
+        
+        # Position camera behind the jeep - FOLLOWING THE JEEP
+        cameraX = jeepObj.posX
+        cameraY = jeepObj.posY + cameraHeight
+        cameraZ = jeepObj.posZ - cameraDistance
+        
+        # Look at the jeep
+        gluLookAt(cameraX, cameraY, cameraZ,  # Camera position (follows jeep)
+                jeepObj.posX, jeepObj.posY, jeepObj.posZ,  # Look at jeep
+                0, 1, 0)  # Up vector
+        
     glMatrixMode(GL_MODELVIEW)
     #glutPostRedisplay()
 
 #-------------------------------------------user inputs------------------
 def mouseHandle(button, state, x, y):
-    global midDown
-    if (button == GLUT_MIDDLE_BUTTON and state == GLUT_DOWN):
-        midDown = True
-        print ('pushed')
-    else:
-        midDown = False    
+    global midDown, nowX, nowY, leftMouseDown, rightMouseDown, prevMouseX, prevMouseY
+    
+    # Left mouse button - for rotating view
+    if button == GLUT_LEFT_BUTTON:
+        if state == GLUT_DOWN:
+            leftMouseDown = True
+            prevMouseX = x
+            prevMouseY = y
+        else:
+            leftMouseDown = False
+    
+    # Middle mouse button - existing functionality
+    elif button == GLUT_MIDDLE_BUTTON:
+        if state == GLUT_DOWN:
+            midDown = True
+            nowX = x
+            nowY = y
+        else:
+            midDown = False
+    
+    # Right mouse button is used for menu
+    elif button == GLUT_RIGHT_BUTTON:
+        if state == GLUT_DOWN:
+            rightMouseDown = True
+        else:
+            rightMouseDown = False
 
 
 def motionHandle(x,y):
-    global nowX, nowY, angle, eyeX, eyeY, eyeZ, phi
-    if (midDown == True):
-        pastX = nowX
-        pastY = nowY 
+    global angle, phi, nowX, nowY, midDown, eyeX, eyeY, eyeZ, leftMouseDown, prevMouseX, prevMouseY, radius, topView, frontView, behindView
+    
+    # Left mouse drag - rotate view around the jeep
+    if leftMouseDown and not manipulationMode:
+        # Disable special views when using mouse rotation
+        topView = False
+        frontView = False
+        behindView = False
+        
+        # Calculate mouse movement delta
+        deltaX = x - prevMouseX
+        deltaY = y - prevMouseY
+        
+        # Update angles based on mouse movement
+        # Horizontal movement rotates around Y axis (angle)
+        angle += deltaX * 0.3  # Sensitivity factor
+        
+        # Vertical movement changes elevation (phi)
+        phi += deltaY * 0.3
+        
+        # Clamp phi to prevent flipping upside down
+        if phi > 89.0:
+            phi = 89.0
+        elif phi < -89.0:
+            phi = -89.0
+        
+        # Update previous mouse position
+        prevMouseX = x
+        prevMouseY = y
+        
+        # Force view update
+        setObjView()
+        glutPostRedisplay()
+    
+    # Middle mouse drag - pan view (existing functionality)
+    elif midDown and not manipulationMode:
+        diffX = x - nowX
+        diffY = y - nowY
+        
+        eyeX += diffX * 0.02
+        eyeZ += diffY * 0.02
+        
         nowX = x
         nowY = y
-        if (nowX - pastX > 0):
-            angle -= 0.25
-        elif (nowX - pastX < 0):
-            angle += 0.25
-        #elif (nowY - pastY > 0): look into looking over and under object...
-            #phi += 1.0
-        #elif (nowX - pastY <0):
-            #phi -= 1.0
-        eyeX = radius * math.sin(angle) 
-        eyeZ = radius * math.cos(angle)
-        #eyeY = radius * math.sin(phi)
-    if centered == False:
-        setView()
-    elif centered == True:
-        setObjView()
-    #print eyeX, eyeY, eyeZ, nowX, nowY, radius, angle
-    #print "getting handled"
+        
+        glutPostRedisplay()
+    
+    # Left mouse drag in manipulation mode - move selected object
+    elif leftMouseDown and manipulationMode and selectedObject:
+        deltaX = x - prevMouseX
+        deltaY = y - prevMouseY
+        
+        # Move object in X-Z plane
+        selectedObject.posX += deltaX * 0.05
+        selectedObject.posZ += deltaY * 0.05
+        
+        prevMouseX = x
+        prevMouseY = y
+        
+        glutPostRedisplay()
+
 
 def mouseWheelHandle(wheel, direction, x, y):
-    global zoomLevel
-    zoomFactor = 1.1
+    global radius, eyeX, eyeY, eyeZ, zoomLevel
     
-    if direction < 0:  # Scroll up - zoom in
-        zoomLevel /= zoomFactor
-        print(f"Zooming in - zoom level: {zoomLevel:.2f}")
-    else:  # Scroll down - zoom out
-        zoomLevel *= zoomFactor
-        print(f"Zooming out - zoom level: {zoomLevel:.2f}")
-    
-    # Clamp zoom level to reasonable bounds
-    zoomLevel = max(0.1, min(5.0, zoomLevel))
-    
-    setView()
+    if not manipulationMode:
+        # Zoom in/out by changing radius
+        if direction > 0:
+            radius -= 1.0  # Zoom in
+            if radius < 2.0:  # Minimum distance
+                radius = 2.0
+        else:
+            radius += 1.0  # Zoom out
+            if radius > 50.0:  # Maximum distance
+                radius = 50.0
+        
+        # Force view update
+        setObjView()
+        glutPostRedisplay()
+
 
     
 def specialKeys(keypress, mX, mY):
@@ -643,12 +869,58 @@ def specialKeys(keypress, mX, mY):
     pass
 
 def myKeyboard(key, mX, mY):
-    global eyeX, eyeY, eyeZ, angle, radius, helpWindow, centered, helpWin, overReason, topView, behindView, frontView, isFullscreen, jeepAccelerated, showHomeScreen
+    global eyeX, eyeY, eyeZ, angle, radius, helpWindow, centered, helpWin, overReason, topView, behindView, frontView, isFullscreen, jeepAccelerated, showHomeScreen, gameStartTime, manipulationMode, selectedObject, phi
     
     # Handle space key to start game from home screen
     if key == b' ' and showHomeScreen:
         showHomeScreen = False
-        print("Starting game!")
+        gameStartTime = glutGet(GLUT_ELAPSED_TIME)  # Record the time when game starts
+        
+        # Reset camera angles and position to default behind view
+        angle = 0.0
+        phi = 0.0
+        radius = 10.0
+        eyeX = 0.0
+        eyeY = 2.0
+        eyeZ = 10.0
+        topView = False
+        frontView = False
+        behindView = False
+        
+        print("Starting game with default camera view!")
+        glutPostRedisplay()
+        return
+    
+    # Toggle manipulation mode with 'M' key
+    if key == b'm' or key == b'M':
+        manipulationMode = not manipulationMode
+        if manipulationMode:
+            # Set the first star as the selected object (you can change this)
+            if len(allstars) > 0:
+                selectedObject = allstars[0]
+                print("Manipulation mode ON - Use left mouse to drag star")
+            else:
+                manipulationMode = False
+                print("No objects to manipulate")
+        else:
+            selectedObject = None
+            print("Manipulation mode OFF - Use left mouse to rotate view")
+        glutPostRedisplay()
+        return
+    
+    # Reset view with 'R' key
+    if key == b'r' or key == b'R':
+        angle = 0.0
+        phi = 0.0
+        radius = 10.0
+        eyeX = 0.0
+        eyeY = 2.0
+        eyeZ = 10.0
+        topView = False
+        frontView = False
+        behindView = False
+        print("View reset to default following camera")
+        setObjView()  # Force view update
         glutPostRedisplay()
         return
     
@@ -841,79 +1113,60 @@ def updateAutomaticObjects():
 
 def collisionCheck():
 
-    global overReason, score, usedDiamond, countTime, jeepAccelerated, accelerationEndTime
-    for obstacle in obstacleCoord:
-        if dist((jeepObj.posX, jeepObj.posZ), obstacle) <= ckSense:
-            overReason = "You hit an obstacle!"
-            gameOver()
-    if (jeepObj.posX >= land or jeepObj.posX <= -land):
-        overReason = "You ran off the road!"
-        gameOver()
-
-    # Check for ribbon collision (acceleration boost)
-    for i, ribbonPos in enumerate(ribbonCoord):
-        if dist((jeepObj.posX, jeepObj.posZ), ribbonPos) <= ckSense:
-            if not jeepAccelerated:  # Only activate if not already accelerated
-                print("Acceleration ribbon activated!")
-                jeepAccelerated = True
-                curTime = glutGet(GLUT_ELAPSED_TIME)
-                accelerationEndTime = curTime + accelerationDuration
-                # Remove the ribbon after use
-                ribbonCoord.pop(i)
-                allribbons.pop(i)
-                break
-
-    if (dist((jeepObj.posX, jeepObj.posZ), (diamondObj.posX, diamondObj.posZ)) <= ckSense and usedDiamond ==False):
-        print ("Diamond bonus!")
-        countTime /= 2
-        usedDiamond = True
-    if (jeepObj.posZ >= land*gameEnlarge):
-        gameSuccess()
-
-    """global overReason, score, usedDiamond, countTime, jeepAccelerated, accelerationEndTime
-    for obstacle in obstacleCoord:
-        if dist((jeepObj.posX, jeepObj.posZ), obstacle) <= ckSense:
-            overReason = "You hit an obstacle!"
-            gameOver()
-    if (jeepObj.posX >= land or jeepObj.posX <= -land):
-        overReason = "You ran off the road!"
-        gameOver()
-
-    # Check for ribbon collision (acceleration boost)
-    for i, ribbon in enumerate(ribbonCoord):
-        if dist((jeepObj.posX, jeepObj.posZ), ribbon) <= ckSense:
-            if not jeepAccelerated:  # Only activate if not already accelerated
-                print("Acceleration ribbon activated!")
-                jeepAccelerated = True
-                curTime = glutGet(GLUT_ELAPSED_TIME)
-                accelerationEndTime = curTime + accelerationDuration
-                # Remove the ribbon after use (optional)
-                ribbonCoord.pop(i)
-                allribbons.pop(i)
-                break
-
-    if (dist((jeepObj.posX, jeepObj.posZ), (diamondObj.posX, diamondObj.posZ)) <= ckSense and usedDiamond ==False):
-        print ("Diamond bonus!")
-        countTime /= 2
-        usedDiamond = True
-    if (jeepObj.posZ >= land*gameEnlarge):
-        gameSuccess()
-    """
-#----------------------------------multiplayer dev (using tracker)-----------
-def recordGame():
-    with open('results.csv', 'wt') as csvfile:
-        spamwriter = csv.writer(csvfile, delimiter=',',quotechar='|', quoting=csv.QUOTE_MINIMAL)
-        ts = time.time()
-        st = datetime.datetime.fromtimestamp(ts).strftime('%Y-%m-%d %H:%M:%S')
-        print(st)
-        spamwriter.writerow([st] + [finalScore])
+    global overReason, score, usedDiamond, countTime, jeepAccelerated, accelerationEndTime, starsCollected, usedRibbons
     
-#-------------------------------------developing additional windows/options----
+    # Check obstacle collisions
+    for obstacle in obstacleCoord:
+        if dist((jeepObj.posX, jeepObj.posZ), obstacle) <= ckSense:
+            overReason = "You hit an obstacle!"
+            gameOver()
+    
+    if (jeepObj.posX >= land or jeepObj.posX <= -land):
+        overReason = "You ran off the road!"
+        gameOver()
+
+    # Check for ribbon collision (acceleration boost) - ribbons stay visible
+    for i, ribbonPos in enumerate(ribbonCoord):
+        if i not in usedRibbons and dist((jeepObj.posX, jeepObj.posZ), ribbonPos) <= ckSense:
+            print("Acceleration ribbon activated!")
+            jeepAccelerated = True
+            curTime = glutGet(GLUT_ELAPSED_TIME)
+            accelerationEndTime = curTime + accelerationDuration
+            usedRibbons.add(i)  # Mark ribbon as used but don't remove it
+
+    # Check star collisions
+    starsToRemove = []
+    for i, starPos in enumerate(rewardCoord):
+        if dist((jeepObj.posX, jeepObj.posZ), starPos) <= ckSense:
+            print(f"Star collected! Total: {starsCollected + 1}")
+            starsCollected += 1
+            starsToRemove.append(i)
+    
+    # Remove collected stars (in reverse order to maintain indices)
+    for i in reversed(starsToRemove):
+        rewardCoord.pop(i)
+        allstars.pop(i)
+
+    # Check diamond collision
+    if (dist((jeepObj.posX, jeepObj.posZ), (diamondObj.posX, diamondObj.posZ)) <= ckSense and usedDiamond ==False):
+        print ("Diamond bonus!")
+        countTime /= 2
+        usedDiamond = True
+    
+    # Check finish line
+    if (jeepObj.posZ >= land*gameEnlarge):
+        gameSuccess()
+
+# Update gameOver() to NOT reset stars before showing window
 def gameOver():
-    global finalScore
+    global finalScore, usedRibbons, angle, phi
     print ("Game completed!")
     finalScore = score-6
-    #recordGame() #add to excel
+    print(f"Stars collected: {starsCollected}/{starAmount}")
+    # Reset camera angles for next game
+    angle = 0.0
+    phi = 0.0
+    usedRibbons.clear()  # Reset used ribbons
     glutHideWindow()
     glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGBA | GLUT_DEPTH)
     glutInitWindowSize(200,200)
@@ -922,11 +1175,16 @@ def gameOver():
     glutDisplayFunc(overScreen)
     glutMainLoop()
     
+# Update gameSuccess() to NOT reset stars before showing window
 def gameSuccess():
-    global finalScore
+    global finalScore, usedRibbons, angle, phi
     print ("Game success!")
     finalScore = score-6
-    #recordGame() #add to excel
+    print(f"Stars collected: {starsCollected}/{starAmount}")
+    # Reset camera angles for next game
+    angle = 0.0
+    phi = 0.0
+    usedRibbons.clear()  # Reset used ribbons
     glutHideWindow()
     glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGBA | GLUT_DEPTH)
     glutInitWindowSize(200,200)
@@ -940,11 +1198,15 @@ def winScreen():
     glColor3f(0.0,1.0,0.0)
     drawTextBitmap("Completed Trial!" , -0.6, 0.85)
     glColor3f(0.0,1.0,0.0)
-    drawTextBitmap("Your score is: ", -1.0, 0.0)
+    drawTextBitmap("Your score is: ", -1.0, 0.2)
     glColor3f(1.0,1.0,1.0)
-    drawTextBitmap(str(finalScore), -1.0, -0.15)
+    drawTextBitmap(str(finalScore), -1.0, 0.05)
+    
+    # Add star count - NOW IT WILL SHOW THE CORRECT VALUE
+    glColor3f(1.0, 1.0, 0.0)  # Yellow color for stars
+    drawTextBitmap(f"Stars collected: {starsCollected}/{starAmount}", -1.0, -0.2)
+    
     glutSwapBuffers()
-
 
 def overScreen():
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
@@ -958,6 +1220,11 @@ def overScreen():
     drawTextBitmap("Your score stopped at: ", -1.0, 0.0)
     glColor3f(1.0,1.0,1.0)
     drawTextBitmap(str(finalScore), -1.0, -0.15)
+    
+    # Add star count to game over screen too
+    glColor3f(1.0, 1.0, 0.0)  # Yellow color for stars
+    drawTextBitmap(f"Stars collected: {starsCollected}/{starAmount}", -1.0, -0.35)
+    
     glutSwapBuffers()
 
 def showHelp():
@@ -970,8 +1237,9 @@ def showHelp():
     drawTextBitmap("3. Toggle views using keys: 5 (top), 2 (behind), 8 (front)" , -1.0, 0.4)
     drawTextBitmap("4. Press H to show/hide this help window" , -1.0, 0.25)
     drawTextBitmap("5. Press R to cycle resolution" , -1.0, 0.1)
-    #drawTextBitmap("6. Press F to toggle fullscreen" , -1.0, -0.05)
-    drawTextBitmap("6. Right-click to change lighting options" , -1.0, -0.05)
+    drawTextBitmap("6. Press F to toggle fullscreen" , -1.0, -0.05)
+    drawTextBitmap("7. Right-click to change lighting options" , -1.0, -0.2)
+    drawTextBitmap("8. Clicking left mouse to drag the view" , -1.0, -0.35)
     glutSwapBuffers()
 
 
@@ -1010,6 +1278,66 @@ def initializeLight():
     glEnable(GL_DEPTH_TEST)              
     glEnable(GL_NORMALIZE)               
     glClearColor(0.1, 0.1, 0.1, 0.0)
+
+def setupLampLights():
+    """Set up point lights for each street lamp (2 bulbs per lamp)"""
+    global lampLightsEnabled
+    
+    if not lampLightsEnabled:
+        return
+    
+    # OpenGL typically supports 8 lights, we use LIGHT0 and LIGHT1 for main scene
+    # So we can use LIGHT2-LIGHT7 for lamps (6 lights = 3 lamps with 2 bulbs each)
+    maxLampLights = min(3, len(alllamps))  # Maximum 3 lamps (6 lights)
+    
+    for i in range(maxLampLights):
+        lamp = alllamps[i]
+        
+        # First bulb (left)
+        lightID1 = GL_LIGHT2 + (i * 2)
+        if lightID1 <= GL_LIGHT7:  # Make sure we don't exceed GL_LIGHT7
+            glEnable(lightID1)
+            
+            # Position at the left bulb location
+            position1 = [lamp.posX - lamp.bulbOffsetX, lamp.bulbHeight1, lamp.posZ, 1.0]
+            
+            # Warm ambient lighting
+            ambient = [0.2, 0.2, 0.15, 1.0]
+            diffuse = [0.6, 0.6, 0.5, 1.0]
+            specular = [0.3, 0.3, 0.25, 1.0]
+            
+            glLightfv(lightID1, GL_POSITION, position1)
+            glLightfv(lightID1, GL_AMBIENT, ambient)
+            glLightfv(lightID1, GL_DIFFUSE, diffuse)
+            glLightfv(lightID1, GL_SPECULAR, specular)
+            
+            # Set attenuation for realistic falloff
+            glLightf(lightID1, GL_CONSTANT_ATTENUATION, 1.0)
+            glLightf(lightID1, GL_LINEAR_ATTENUATION, 0.2)
+            glLightf(lightID1, GL_QUADRATIC_ATTENUATION, 0.05)
+        
+        # Second bulb (right)
+        lightID2 = GL_LIGHT2 + (i * 2) + 1
+        if lightID2 <= GL_LIGHT7:  # Make sure we don't exceed GL_LIGHT7
+            glEnable(lightID2)
+            
+            # Position at the right bulb location
+            position2 = [lamp.posX + lamp.bulbOffsetX, lamp.bulbHeight2, lamp.posZ, 1.0]
+            
+            glLightfv(lightID2, GL_POSITION, position2)
+            glLightfv(lightID2, GL_AMBIENT, ambient)
+            glLightfv(lightID2, GL_DIFFUSE, diffuse)
+            glLightfv(lightID2, GL_SPECULAR, specular)
+            
+            # Set attenuation for realistic falloff
+            glLightf(lightID2, GL_CONSTANT_ATTENUATION, 1.0)
+            glLightf(lightID2, GL_LINEAR_ATTENUATION, 0.2)
+            glLightf(lightID2, GL_QUADRATIC_ATTENUATION, 0.05)
+
+def disableLampLights():
+    """Disable all lamp lights"""
+    for i in range(6):
+        glDisable(GL_LIGHT2 + i)
 
 def setupAmbientLight():
     resetLightingState()
@@ -1099,6 +1427,9 @@ def resetLightingState():
     glDisable(GL_LIGHT0)
     glDisable(GL_LIGHT1)
     
+    # Disable lamp lights too
+    disableLampLights()
+    
     # Reset all light properties to OpenGL defaults
     default_ambient = [0.0, 0.0, 0.0, 1.0]
     default_diffuse = [1.0, 1.0, 1.0, 1.0]
@@ -1127,37 +1458,67 @@ def resetLightingState():
 
 #-----------------------------------------------menu----------------------------------
 def myMenu(option):
-    global applyLighting, currentLightType
+    global applyLighting, currentLightType, lampLightsEnabled, useShaders, currentShadingModel
     
     if option == 1:
         applyLighting = True
         currentLightType = "ambient"
+        useShaders = False
+        currentShadingModel = "fixed"
         setupAmbientLight()
         print("ambient")
     elif option == 2:
         applyLighting = True
         currentLightType = "point"
+        useShaders = False
+        currentShadingModel = "fixed"
         setupPointLight()
         print("point")
     elif option == 3:
         applyLighting = True
         currentLightType = "directional"
+        useShaders = False
+        currentShadingModel = "fixed"
         setupDirectionalLight()
         print("directional")
     elif option == 4:
         applyLighting = True
         currentLightType = "spotlight"
+        useShaders = False
+        currentShadingModel = "fixed"
         setupSpotlight()
         print("spotlight")
     elif option == 5:
         applyLighting = False
         currentLightType = "none"
-        # Reset to original clear color
+        useShaders = False
+        currentShadingModel = "fixed"
         resetLightingState()
+        lampLightsEnabled = False
         print("Reset")
+    elif option == 6:
+        lampLightsEnabled = not lampLightsEnabled
+        if lampLightsEnabled:
+            setupLampLights()
+            print("Street lamp lights enabled")
+        else:
+            disableLampLights()
+            print("Street lamp lights disabled")
+    elif option == 7:
+        # Toggle Blinn-Phong shader
+        useShaders = not useShaders
+        if useShaders:
+            applyLighting = False
+            currentShadingModel = "blinn-phong"
+            glDisable(GL_LIGHTING)
+            print("Blinn-Phong shader enabled")
+        else:
+            currentShadingModel = "fixed"
+            print("Blinn-Phong shader disabled")
 
-    print("Current Light Type: " + currentLightType)
+    print(f"Current Light Type: {currentLightType}, Shading Model: {currentShadingModel}")
     glutPostRedisplay()
+    return 0  # Add explicit return value for GLUT callback
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~the finale!!!~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -1194,16 +1555,9 @@ def main():
     glutKeyboardFunc(myKeyboard)
     glutReshapeFunc(noReshape)
     
-    glutCreateMenu(myMenu)
-    glutAddMenuEntry("Ambient Light", 1)
-    glutAddMenuEntry("Point Light", 2)
-    glutAddMenuEntry("Directional Light", 3)
-    glutAddMenuEntry("Spotlight", 4)
-    glutAddMenuEntry("No Lighting", 5)
-    glutAttachMenu(GLUT_RIGHT_BUTTON)
-
-    # Calculate total loading steps
+    # Calculate total loading steps BEFORE any updateLoadingProgress calls
     totalLoadingSteps = (
+        1 +  # Initialize shaders
         1 +  # Load textures
         3 +  # Load jeep models (3 jeeps)
         (coneAmount - 2) +  # Create regular cones
@@ -1226,13 +1580,27 @@ def main():
 
     # Show initial loading screen
     display()
-    # filepath: c:\Users\NADIA\CS4182\project\src\main.py
     glutSwapBuffers()
     glutMainLoopEvent()
     
     # Add small delay to ensure window is fully initialized
     import time
     time.sleep(0.1)
+    
+    # Initialize shaders
+    updateLoadingProgress("Initializing shaders")
+    initializeShaders()
+    
+    # Update menu
+    glutCreateMenu(myMenu)
+    glutAddMenuEntry("Ambient Light", 1)
+    glutAddMenuEntry("Point Light", 2)
+    glutAddMenuEntry("Directional Light", 3)
+    glutAddMenuEntry("Spotlight", 4)
+    glutAddMenuEntry("No Lighting", 5)
+    glutAddMenuEntry("Toggle Lamp Lights", 6)
+    glutAddMenuEntry("Toggle Blinn-Phong Shader", 7)
+    glutAttachMenu(GLUT_RIGHT_BUTTON)
 
     # Load textures
     updateLoadingProgress("Loading textures")
