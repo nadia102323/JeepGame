@@ -17,6 +17,11 @@ A 3D Jeep game built with Python and OpenGL featuring a jeep, obstacles, collect
 
 ## Requirements
 
+### For Running the Executable (Recommended)
+- Windows OS
+- **No additional installation required** - the executable is standalone
+
+### For Running from Source
 The project requires Python 3.x with the following dependencies listed in [src/requirements.txt](src/requirements.txt):
 
 - PyOpenGL
@@ -26,7 +31,17 @@ The project requires Python 3.x with the following dependencies listed in [src/r
 
 ## Installation
 
-1. **Install Python Dependencies**
+### Option 1: Run Pre-built Executable (Windows) - **EASIEST METHOD**
+
+**No installation needed!** Simply navigate to the `dist` folder and double-click:
+
+```
+dist/main.exe
+```
+
+The executable is standalone and includes all required dependencies.
+
+### Option 2: Install Python Dependencies (For running from source)
 
 ```bash
 pip install -r src/requirements.txt
@@ -40,7 +55,22 @@ pip install PyOpenGL PyOpenGL-accelerate numpy Pillow
 
 ## Running the Game
 
-### Option 1: Run from Source
+### Option 1: Run Pre-built Executable (Windows) - **RECOMMENDED**
+
+Simply double-click the executable:
+
+```
+dist/main.exe
+```
+
+Or from command line:
+
+```bash
+cd dist
+main.exe
+```
+
+### Option 2: Run from Source
 
 Navigate to the `src` directory and run:
 
@@ -48,24 +78,6 @@ Navigate to the `src` directory and run:
 cd src
 python main.py
 ```
-
-### Option 2: Run Pre-built Executable (Windows)
-
-If you have built the executable using PyInstaller, run:
-
-```bash
-dist/RacingGame.exe
-```
-
-## Building an Executable (Optional)
-
-To create a standalone executable using PyInstaller with the provided [game.spec](game.spec):
-
-```bash
-pyinstaller game.spec
-```
-
-The executable will be created in the `dist/` directory.
 
 ## Controls
 
@@ -142,12 +154,28 @@ project/
 │   └── blinn_phong.frag     # Fragment shader
 ├── img/                     # Textures and images
 ├── objects/                 # 3D models (.obj, .mtl)
+├── dist/
+│   └── main.exe             # **Standalone executable (READY TO RUN)**
 ├── build/                   # Build artifacts
-├── dist/                    # Compiled executable
-└── game.spec               # PyInstaller specification
+└── game.spec                # PyInstaller specification
 ```
 
+## Building an Executable (Optional)
+
+The executable is already included in the `dist/` folder. If you need to rebuild it:
+
+```bash
+pyinstaller game.spec
+```
+
+The new executable will be created in the `dist/` directory.
+
 ## Troubleshooting
+
+### Executable Won't Start
+- Make sure all game assets (img/, objects/, shaders/ folders) are in the correct locations relative to the executable
+- Try running as administrator if you encounter permission issues
+- Check Windows Defender or antivirus - they may block the executable initially
 
 ### Missing Textures
 Ensure the `img/` folder is in the correct location relative to the executable or source files.
